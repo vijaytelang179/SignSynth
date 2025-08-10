@@ -23,19 +23,11 @@ from vosk import Model, KaldiRecognizer
 
 class ContinuousSpeechGloss:
     """
-    Class for continuous speech recognition and gloss translation.
-    Runs in the background and processes speech without auto-stopping.
+    Continuously recognizes speech, converts it to sign language gloss,
+    and passes results to a callback or queue.
     """
-
     def __init__(self, model_path="vosk-model-small-en-us-0.15", callback=None):
-        """
-        Initialize continuous speech recognition.
-
-        Args:
-            model_path (str): Path to the Vosk model
-            callback (function): Optional callback function that receives (transcript, gloss) tuples
-        """
-        # Ensure NLTK resources are downloaded
+        # Ensure required nltk resources are available
         try:
             nltk.data.find('tokenizers/punkt')
             nltk.data.find('corpora/stopwords')
@@ -43,12 +35,12 @@ class ContinuousSpeechGloss:
             nltk.download('punkt', quiet=True)
             nltk.download('stopwords', quiet=True)
 
-        # Setup NLP resources
+        # Set up stop words and pronouns required for glossing
         self.stop_words = set(stopwords.words('english')) - {
             'i', 'you', 'we', 'he', 'she', 'they', 'me', 'my', 'your', 'our', 'his', 'her', 'their'
         }
 
-        # Gloss mapping for sign language
+        # Mapping from words/phrases to gloss
         self.gloss_map = {
             "i": "ME", "you": "YOU", "we": "US", "he": "HE", "she": "SHE", "they": "THEY",
             "am": "", "is": "", "are": "", "was": "", "were": "",
@@ -67,7 +59,7 @@ class ContinuousSpeechGloss:
         self.callback = callback
         self.running = False
         self.thread = None
-        self.results = queue.Queue()  # Store results if no callback is provided
+        self.results = queue.Queue()
 
     def convert_to_sign_gloss(self, text):
         """Convert normal text to sign language gloss notation"""
@@ -78,14 +70,14 @@ class ContinuousSpeechGloss:
         gloss_sequence = []
         for word in filtered:
             gloss_word = self.gloss_map.get(word.lower(), word.upper())
-            if gloss_word:  # Only add non-empty strings
+            if gloss_word:
                 gloss_sequence.append(gloss_word)
 
         gloss_string = " ".join(gloss_sequence)
         return gloss_string
 
     def start(self):
-        """Start continuous speech recognition"""
+        """Start continuous speech recognition in a background thread"""
         if self.running:
             return False
 
@@ -96,26 +88,27 @@ class ContinuousSpeechGloss:
         return True
 
     def stop(self):
-        """Stop continuous speech recognition"""
+        """Stop background speech recognition"""
         self.running = False
         if self.thread:
             self.thread.join(timeout=1.0)
         return True
 
     def get_latest_result(self):
-        """Get the latest result from the queue (if no callback was provided)"""
+        """Retrieve latest recognition result from internal queue (if no callback used)"""
         if not self.results.empty():
             return self.results.get()
         return None
 
     def _listen_continuously(self):
-        """Background thread that listens for speech continuously"""
+        """
+        Constantly listens for speech, performs recognition and gloss conversion.
+        Sends results via callback or internal queue.
+        """
         try:
-            # Setup Vosk model
             model = Model(self.model_path)
             recognizer = KaldiRecognizer(model, 16000)
 
-            # Setup audio stream
             mic = pyaudio.PyAudio()
             stream = mic.open(
                 format=pyaudio.paInt16,
@@ -132,23 +125,17 @@ class ContinuousSpeechGloss:
                 data = stream.read(4096, exception_on_overflow=False)
 
                 if recognizer.AcceptWaveform(data):
-                    # Process final results
                     result = json.loads(recognizer.Result())
                     text = result.get("text", "").strip()
-
                     if text:
-                        # Convert to gloss
                         gloss = self.convert_to_sign_gloss(text)
-
-                        # Process result
                         if self.callback:
                             self.callback(text, gloss)
                         else:
                             self.results.put((text, gloss))
 
-                time.sleep(0.01)  # Small sleep to prevent CPU hogging
+                time.sleep(0.01)
 
-            # Clean up resources
             stream.stop_stream()
             stream.close()
             mic.terminate()
@@ -165,27 +152,31 @@ class ContinuousSpeechGloss:
 
 
 class SignLanguageApp(ShowBase):
+    """
+    Main application class: integrates 3D model, sign pose animation, UI,
+    speech recognition, and optional media control for sign language display.
+    """
     def __init__(self):
         ShowBase.__init__(self)
 
-        # Set up the base window and camera
+        # Camera and visual setup
         self.disableMouse()
         self.camera.setPos(0, -15, 3.25)
         self.camera.lookAt(0, 0, 0)
 
-        # Create title text
+        # Title display
         self.title = OnscreenText(
             text="SignSynth",
             style=1, fg=(1, 1, 1, 1), pos=(0, 0.9),
             scale=0.1, mayChange=True
         )
 
-        # Load 3D model and setup
+        # Load all 3D models and scene elements
         self.loadModels()
         self.setupLights()
         self.setupSkybox()
 
-        # Load pose data
+        # Load pose definitions for all signs
         try:
             self.current_pose = "default"
             self.gesture_data = self.loadAllPoseData()
@@ -196,10 +187,10 @@ class SignLanguageApp(ShowBase):
         except Exception as e:
             print(f"Could not load pose data: {e}")
 
-        # Media control variables
+        # Media control state variables
         self.media_control_active = False
-        self.play_interval = 5  # Default play interval
-        self.pause_interval = 5  # Default pause interval
+        self.play_interval = 5
+        self.pause_interval = 5
         self.last_media_action_time = 0
         self.media_state = "paused"
 
@@ -207,20 +198,24 @@ class SignLanguageApp(ShowBase):
         self.speech_recognition_active = False
         self.speech_processor = None
 
-        # Animation and media sync flags
-        self.signing_complete = True  # Initially true since no signing is happening
+        # Animation flags
+        self.signing_complete = True  # Signals whether signing is in progress
 
-        # Create UI elements
+        # Set up the user interface
         self.setup_ui()
 
-        # Start speech recognition automatically
+        # Start the speech recognition processor on launch
         self.start_speech_recognition()
 
-        # Start media control automatically but in inactive state
+        # Prepare (but do not activate) media control functionality
         self.setup_media_control()
 
     def setup_ui(self):
-        # Setup simple status display
+        """
+        Create on-screen user interface elements for:
+          - Status display
+          - Control buttons for speech and media control
+        """
         self.status_text = OnscreenText(
             text="Ready for speech input. Media control inactive.",
             pos=(0, -0.55),
@@ -230,38 +225,12 @@ class SignLanguageApp(ShowBase):
             mayChange=True
         )
 
-        # Text display for recognized speech
-        # self.speech_result_frame = DirectFrame(
-        #     frameColor=(0.9, 0.9, 0.9, 0.7),
-        #     frameSize=(-0.8, 0.8, -0.15, 0.15),
-        #     pos=(0, 0, 0.7)
-        # )
-        #
-        # # Labels for speech and gloss
-        # self.speech_text_label = OnscreenText(
-        #     parent=self.speech_result_frame,
-        #     text="Speech: ",
-        #     scale=0.04,
-        #     align=TextNode.ALeft,
-        #     pos=(-0.75, 0.1)
-        # )
-        #
-        # self.speech_gloss_label = OnscreenText(
-        #     parent=self.speech_result_frame,
-        #     text="Gloss: ",
-        #     scale=0.04,
-        #     align=TextNode.ALeft,
-        #     pos=(-0.75, -0.05)
-        # )
-
-        # Controls for starting/stopping functionality
         self.control_frame = DirectFrame(
             frameColor=(0.2, 0.2, 0.2, 0.7),
             frameSize=(-0.7, 0.7, -0.15, 0.15),
             pos=(0, 0, -0.8)
         )
 
-        # Toggle buttons for main features
         self.speech_toggle_button = DirectButton(
             parent=self.control_frame,
             text="Stop Speech Recognition",
@@ -269,7 +238,7 @@ class SignLanguageApp(ShowBase):
             frameSize=(-0.3, 0.3, -0.06, 0.06),
             command=self.toggle_speech_recognition,
             pos=(-0.35, 0, 0),
-            frameColor=(0.9, 0.3, 0.3, 1)  # Red for stop
+            frameColor=(0.9, 0.3, 0.3, 1)
         )
 
         self.media_toggle_button = DirectButton(
@@ -279,27 +248,30 @@ class SignLanguageApp(ShowBase):
             frameSize=(-0.3, 0.3, -0.06, 0.06),
             command=self.toggle_media_control,
             pos=(0.35, 0, 0),
-            frameColor=(0.3, 0.6, 0.9, 1)  # Blue for start
+            frameColor=(0.3, 0.6, 0.9, 1)
         )
 
     def loadModels(self):
+        """Load 3D character model, arms, and attach to scene graph."""
         self.torso = loader.loadModel('character/torso.glb')
         self.torso.setPos(0, 0, -1.5)
         self.torso.reparentTo(render)
         self.torso.setScale(0.7)
 
-        # Load arms
+        # Load left and right arms as children
         self.rarm = loader.loadModel('character/RArmX.glb')
         self.rarm.reparentTo(self.torso)
-
         self.larm = loader.loadModel('character/LArmX.glb')
         self.larm.reparentTo(self.torso)
-
-        # Setup detailed arm parts
+        # Set up references to finger parts for each arm
         self.setup_arm_details()
 
     def setup_arm_details(self):
-        # Right arm
+        """
+        Store references to all finger segment nodes for both arms
+        so poses can be efficiently applied.
+        """
+        # Right arm fingers
         self.rthumb1 = self.rarm.find("**/t1")
         self.rthumb2 = self.rarm.find("**/t2")
         self.rindex1 = self.rarm.find("**/i1")
@@ -315,7 +287,7 @@ class SignLanguageApp(ShowBase):
         self.rpinky2 = self.rarm.find("**/p2")
         self.rpinky3 = self.rarm.find("**/p3")
 
-        # Left arm
+        # Left arm fingers
         self.lthumb1 = self.larm.find("**/t1")
         self.lthumb2 = self.larm.find("**/t2")
         self.lindex1 = self.larm.find("**/i1")
@@ -332,6 +304,7 @@ class SignLanguageApp(ShowBase):
         self.lpinky3 = self.larm.find("**/p3")
 
     def setupLights(self):
+        """Create a main directional light and ambient light for 3D scene."""
         mainLight = DirectionalLight('main light')
         mainLight.setShadowCaster(True)
         mainLightNodePath = render.attachNewNode(mainLight)
@@ -345,6 +318,7 @@ class SignLanguageApp(ShowBase):
         render.setShaderAuto()
 
     def setupSkybox(self):
+        """Loads a skybox model if available, otherwise prints an error."""
         try:
             skybox = loader.loadModel('skybox/skybox.egg')
             skybox.setScale(50)
@@ -356,19 +330,18 @@ class SignLanguageApp(ShowBase):
             print(f"Could not load skybox: {e}")
 
     def loadAllPoseData(self):
+        """Load all sign pose definitions from local JSON file."""
         with open("sign_poses.json", "r") as f:
             return json.load(f)
 
     def loadSignPoses(self, name):
+        """
+        Apply pose data for a given sign or letter to hand and finger models.
+        """
         poses = self.gesture_data.get(name)
-        if isinstance(poses, list):
-            pose = poses[0]
-        else:
-            pose = poses
-
+        pose = poses[0] if isinstance(poses, list) else poses
         if not pose:
             return
-
         l = pose["leftHand"]
         r = pose["rightHand"]
         self.larm.setPos(*l["pos"])
@@ -408,6 +381,10 @@ class SignLanguageApp(ShowBase):
                 applyFingerPose([self.rpinky1, self.rpinky2, self.rpinky3], f["pinky"])
 
     def expandPoseSequence(self, sequence):
+        """
+        For each recognized word, use that sign if available; otherwise,
+        expand to fingerspelling (letter signs).
+        """
         result = []
         for word in sequence:
             if word.lower() in self.gesture_data:
@@ -419,45 +396,41 @@ class SignLanguageApp(ShowBase):
         return result
 
     def start_animation(self, text):
-        # If there's already animation running, stop it
+        """
+        Start animating signs for a recognized phrase or sentence.
+        """
         self.stopAnimation()
-
-        # Store the text
         self.current_text = text.strip()
-
-        # Split the text into words
         words = self.current_text.split()
-
-        # Create an expanded sequence of poses
         self.expanded_sequence = self.expandPoseSequence(words)
 
         if not self.expanded_sequence:
             self.status_text.setText("No valid signs found in text")
-            self.signing_complete = True  # Mark as complete even though nothing happened
+            self.signing_complete = True
             return
 
         self.status_text.setText(f"Signing: {self.current_text}")
         self.pose_index = 0
         self.is_animating = True
-        self.signing_complete = False  # Signing is now in progress
+        self.signing_complete = False
 
-        # If media control is active, pause media while signing
+        # Pause media playback if needed during signing
         if self.media_control_active and self.media_state == "playing":
             self.pause_media()
-
-        # Start animation task
         taskMgr.add(self.animateNextPose, "SignAnimation")
 
     def stopAnimation(self):
-        # Stop any running animation task
+        """Stop the current sign animation task if running."""
         if self.is_animating:
             taskMgr.remove("SignAnimation")
             self.is_animating = False
 
     def slideArms(self):
+        """
+        Provide a simple sliding motion animation for fingerspelling transitions.
+        """
         slide_distance = 0.5
-        time = 0.2  # Increased wait time between poses
-
+        time = 0.2
         sequence = Sequence(
             LerpPosInterval(self.larm, time, self.larm.getPos()),
             LerpPosInterval(self.rarm, time, self.rarm.getPos() + LVecBase3f(-slide_distance, 0, 0)),
@@ -467,22 +440,23 @@ class SignLanguageApp(ShowBase):
         sequence.start()
 
     def animateNextPose(self, task):
+        """
+        Animates each sign or letter in the expanded sequence, applying relevant poses.
+        """
         if self.pose_index >= len(self.expanded_sequence):
             self.loadSignPoses("default")
             self.pose_index = 0
             self.is_animating = False
             self.status_text.setText("Animation Complete")
             self.current_pose = ""
-            self.signing_complete = True  # Signing is now complete
-
-            # If media control is active, resume media after signing
+            self.signing_complete = True
+            # Resume media playback after signing if needed
             if self.media_control_active and self.media_state == "paused":
                 self.resume_media()
             return Task.done
 
         pose_name = self.expanded_sequence[self.pose_index]
-
-        # Check for same as previous
+        # Avoid repeating the same pose for consecutive same letters
         if self.current_pose == pose_name and len(pose_name) == 1:
             self.slideArms()
             self.pose_index += 1
@@ -490,13 +464,13 @@ class SignLanguageApp(ShowBase):
 
         self.current_pose = pose_name
         poses = self.gesture_data.get(pose_name)
-
         if not poses:
             self.pose_index += 1
             return task.again
 
+        # Animation sequence for the current sign or letter
         sequence = []
-        time = 0.05  # Slower movement between poses
+        time = 0.05  # Duration per movement
 
         def addFingerLerp(hand_data, finger_map):
             if "fingers" not in hand_data:
@@ -537,130 +511,116 @@ class SignLanguageApp(ShowBase):
         else:
             addHandAndFingers(poses)
 
-        # Execute the sequence
         Sequence(*sequence).start()
-
-        # Update display to show current pose
         self.status_text.setText(f"Signing: {self.current_text} ('{pose_name}')")
-
-        # Move to next pose after a delay
-        task.delayTime = 1.5  # Long pause between signs
+        task.delayTime = 1.5  # Wait before the next pose
         self.pose_index += 1
-
-        # Schedule next pose animation
         return task.again
 
     def setup_media_control(self):
-        """Set up the media control system"""
-        # Add the media control task but don't activate it yet
+        """
+        Set up background task for media control (play/pause).
+        Takes no effect until activated.
+        """
         taskMgr.add(self.media_control_task, "MediaControlTask")
 
     def toggle_media_control(self):
-        """Toggle media control on or off"""
+        """
+        Enable or disable media control mode. Updates UI and resets timing.
+        """
         try:
-            # Toggle state
             self.media_control_active = not self.media_control_active
 
             if self.media_control_active:
-                # We're starting - update UI
                 self.media_toggle_button["text"] = "Stop Media Control"
-                self.media_toggle_button["frameColor"] = (0.9, 0.3, 0.3, 1)  # Red for stop
+                self.media_toggle_button["frameColor"] = (0.9, 0.3, 0.3, 1)
                 self.status_text.setText("Media control starting (switch to media tab)")
-
-                # Initialize media control state
                 self.last_media_action_time = time.time()
-                self.media_state = "starting"  # Use starting state for initial delay
-
-                # Alert user to switch tabs
+                self.media_state = "starting"
                 print("Media control starting - switch to your media tab within 3 seconds!")
             else:
-                # We're stopping - update UI
                 self.media_toggle_button["text"] = "Start Media Control"
-                self.media_toggle_button["frameColor"] = (0.3, 0.6, 0.9, 1)  # Blue for start
+                self.media_toggle_button["frameColor"] = (0.3, 0.6, 0.9, 1)
                 self.status_text.setText("Speech recognition active, media control inactive")
                 self.media_state = "paused"
-
                 print("Media control stopped")
 
         except Exception as e:
-            # Log any errors
             print(f"Error toggling media control: {str(e)}")
             self.status_text.setText(f"Error: {str(e)}")
 
     def media_control_task(self, task):
-        """Task to control media playback"""
+        """
+        Background task for alternating media play/pause based on timing.
+        Only active if media_control_active flag is set.
+        """
         if not self.media_control_active:
             return Task.cont
-
-        # If signing is in progress, don't change media state
         if not self.signing_complete:
-            return Task.cont
+            return Task.cont  # Prevent media state change while signing
 
         current_time = time.time()
         elapsed = current_time - self.last_media_action_time
 
-        # Handle startup delay
         if self.media_state == "starting" and elapsed >= 3:
-            # Initial action after startup delay - simulate keyboard space bar
-            # self.simulate_space_press()
+            # After initial delay, start playback
             self.last_media_action_time = current_time
             self.media_state = "playing"
             self.status_text.setText("Media playing")
 
-        # Handle play to pause transition
         elif self.media_state == "playing" and elapsed >= self.play_interval:
             self.pause_media()
-
-        # Handle pause to play transition
-        # elif self.media_state == "paused" and elapsed >= self.pause_interval:
-        #     self.resume_media()
 
         return Task.cont
 
     def pause_media(self):
-        """Pause media and update state"""
+        """
+        Simulate keyboard press to pause media and update internal state/UI.
+        """
         self.simulate_space_press()
         self.last_media_action_time = time.time()
         self.media_state = "paused"
         self.status_text.setText("Media paused")
 
     def resume_media(self):
-        """Resume media and update state"""
+        """
+        Simulate keyboard press to resume media and update internal state/UI.
+        """
         self.simulate_space_press()
         self.last_media_action_time = time.time()
         self.media_state = "playing"
         self.status_text.setText("Media playing")
 
     def simulate_space_press(self):
-        """Simulate pressing the space bar to play/pause media"""
+        """
+        Programmatically sends a space key press to control external media playback.
+        Handles cross-platform differences.
+        """
         if sys.platform == 'win32':
             try:
-                # For Windows
                 shell = win32com.client.Dispatch("WScript.Shell")
                 shell.SendKeys(" ", 0)
-                print("Space key pressed (Windows)")
             except ImportError:
                 print("Could not import win32com.client - media control may not work properly")
         else:
             try:
-                # For macOS and Linux
                 import pyautogui
                 pyautogui.press('space')
-                print("Space key pressed (macOS/Linux)")
             except ImportError:
                 print("Could not import pyautogui - media control may not work properly")
 
     def start_speech_recognition(self):
-        """Start speech recognition automatically"""
+        """
+        Launch the speech recognition processor and update UI state accordingly.
+        """
         try:
             if not self.speech_processor:
                 self.speech_processor = ContinuousSpeechGloss(callback=self.handle_speech_result)
-
             success = self.speech_processor.start()
             if success:
                 self.speech_recognition_active = True
                 self.speech_toggle_button["text"] = "Stop Speech Recognition"
-                self.speech_toggle_button["frameColor"] = (0.9, 0.3, 0.3, 1)  # Red for stop
+                self.speech_toggle_button["frameColor"] = (0.9, 0.3, 0.3, 1)
                 self.status_text.setText("Speech recognition active")
             else:
                 self.status_text.setText("Error: Speech recognition failed to start")
@@ -670,18 +630,19 @@ class SignLanguageApp(ShowBase):
             self.status_text.setText("Error: Failed to start speech recognition")
 
     def toggle_speech_recognition(self):
-        """Toggle speech recognition on or off"""
+        """
+        Toggle speech recognition on/off and update UI button and state.
+        """
         if not self.speech_recognition_active:
             self.start_speech_recognition()
         else:
-            # Stop speech recognition
             try:
                 if self.speech_processor:
                     success = self.speech_processor.stop()
                     if success:
                         self.speech_recognition_active = False
                         self.speech_toggle_button["text"] = "Start Speech Recognition"
-                        self.speech_toggle_button["frameColor"] = (0.3, 0.6, 0.9, 1)  # Blue for start
+                        self.speech_toggle_button["frameColor"] = (0.3, 0.6, 0.9, 1)
                         self.status_text.setText("Speech recognition inactive")
                     else:
                         self.status_text.setText("Error: Failed to stop speech recognition")
@@ -691,21 +652,17 @@ class SignLanguageApp(ShowBase):
                 self.status_text.setText("Error: Failed to stop speech recognition")
 
     def handle_speech_result(self, text, gloss):
-        """Handle speech recognition results"""
+        """
+        Called whenever new speech is recognized.
+        Updates UI and triggers sign animation (unless an animation is already running).
+        """
         if text and gloss:
-            # Update display
-            # self.speech_text_label["text"] = f"Speech: {text}"
-            # self.speech_gloss_label["text"] = f"Gloss: {gloss}"
-
-            # If already animating, skip this input
             if self.is_animating:
-                return
-
-            # Automatically sign the recognized text
+                return  # Wait for current animation to complete
             self.start_animation(text)
 
 
-# Main entry point
+# Main entry point, creates and runs the application
 def run_app():
     app = SignLanguageApp()
     app.run()
