@@ -42,17 +42,60 @@ class ContinuousSpeechGloss:
 
         # Mapping from words/phrases to gloss
         self.gloss_map = {
-            "i": "ME", "you": "YOU", "we": "US", "he": "HE", "she": "SHE", "they": "THEY",
-            "am": "", "is": "", "are": "", "was": "", "were": "",
-            "going": "GO", "go": "GO", "want": "WANT", "have": "HAVE", "had": "HAVE",
-            "don't": "NOT", "not": "NOT", "no": "NOT", "won't": "NOT WILL",
-            "store": "STORE", "because": "WHY", "milk": "MILK", "to": "",
-            "the": "", "a": "", "an": "", "and": "PLUS", "but": "BUT",
-            "this": "THIS", "that": "THAT", "there": "THERE", "here": "HERE",
-            "what": "WHAT", "who": "WHO", "where": "WHERE", "when": "WHEN", "why": "WHY", "how": "HOW",
-            "need": "NEED", "can": "CAN", "will": "WILL", "should": "SHOULD", "must": "MUST",
-            "good": "GOOD", "bad": "BAD", "happy": "HAPPY", "sad": "SAD",
-            "yes": "YES", "okay": "OK", "like": "LIKE", "help": "HELP"
+            "i": "ME",
+            "you": "YOU",
+            "we": "US",
+            "he": "HE",
+            "she": "SHE",
+            "they": "THEY",
+            "am": "",
+            "is": "",
+            "'s": "",
+            "are": "",
+            "was": "",
+            "were": "",
+            "going": "GO",
+            "go": "GO",
+            "want": "WANT",
+            "have": "HAVE",
+            "had": "HAVE",
+            "don't": "NOT",
+            "not": "NOT",
+            "no": "NOT",
+            "won't": "NOT WILL",
+            "store": "STORE",
+            "because": "WHY",
+            "milk": "MILK",
+            "to": "",
+            "the": "",
+            "a": "",
+            "an": "",
+            "and": "PLUS",
+            "but": "BUT",
+            "this": "THIS",
+            "that": "THAT",
+            "there": "THERE",
+            "here": "HERE",
+            "what": "WHAT",
+            "who": "WHO",
+            "where": "WHERE",
+            "when": "WHEN",
+            "why": "WHY",
+            "how": "HOW",
+            "need": "NEED",
+            "can": "CAN",
+            "will": "WILL",
+            "should": "SHOULD",
+            "must": "MUST",
+            "good": "GOOD",
+            "bad": "BAD",
+            "happy": "HAPPY",
+            "sad": "SAD",
+            "yes": "YES",
+            "okay": "OK",
+            "like": "LIKE",
+            "help": "HELP",
+            "hello":"hi"
         }
 
         self.model_path = model_path
@@ -64,15 +107,26 @@ class ContinuousSpeechGloss:
     def convert_to_sign_gloss(self, text):
         """Convert normal text to sign language gloss notation"""
         words = word_tokenize(text.lower())
-        words = [word for word in words if word not in string.punctuation]
-        filtered = [word for word in words if word not in self.stop_words or word.lower() in self.gloss_map]
+        words = [w for w in words if w not in string.punctuation]
 
         gloss_sequence = []
-        for word in filtered:
-            gloss_word = self.gloss_map.get(word.lower(), word.upper())
-            if gloss_word:
-                gloss_sequence.append(gloss_word)
+        seen_pronouns = set()
 
+        for word in words:
+            # Only skip stop words that aren't in gloss_map
+            if word in self.stop_words and word not in self.gloss_map:
+                continue
+
+            gloss_word = self.gloss_map.get(word, word.upper()).strip()
+            if not gloss_word:
+                continue
+
+            # Only include pronouns once
+            if gloss_word in {"ME", "YOU", "HE", "SHE", "US", "THEY"}:
+                if gloss_word in seen_pronouns:
+                    continue
+                seen_pronouns.add(gloss_word)
+            gloss_sequence.append(gloss_word)
         gloss_string = " ".join(gloss_sequence)
         return gloss_string
 
@@ -253,15 +307,15 @@ class SignLanguageApp(ShowBase):
 
     def loadModels(self):
         """Load 3D character model, arms, and attach to scene graph."""
-        self.torso = loader.loadModel('character/torso.glb')
+        self.torso = self.loader.loadModel('character/torso.glb')
         self.torso.setPos(0, 0, -1.5)
-        self.torso.reparentTo(render)
+        self.torso.reparentTo(self.render)
         self.torso.setScale(0.7)
 
         # Load left and right arms as children
-        self.rarm = loader.loadModel('character/RArmX.glb')
+        self.rarm = self.loader.loadModel('character/RArmX.glb')
         self.rarm.reparentTo(self.torso)
-        self.larm = loader.loadModel('character/LArmX.glb')
+        self.larm = self.loader.loadModel('character/LArmX.glb')
         self.larm.reparentTo(self.torso)
         # Set up references to finger parts for each arm
         self.setup_arm_details()
@@ -307,25 +361,25 @@ class SignLanguageApp(ShowBase):
         """Create a main directional light and ambient light for 3D scene."""
         mainLight = DirectionalLight('main light')
         mainLight.setShadowCaster(True)
-        mainLightNodePath = render.attachNewNode(mainLight)
+        mainLightNodePath = self.render.attachNewNode(mainLight)
         mainLightNodePath.setHpr(0, -70, 0)
-        render.setLight(mainLightNodePath)
+        self.render.setLight(mainLightNodePath)
 
         ambientLight = AmbientLight('ambient light')
         ambientLight.setColor((0.2, 0.2, 0.2, 1))
-        ambientLightNodePath = render.attachNewNode(ambientLight)
-        render.setLight(ambientLightNodePath)
-        render.setShaderAuto()
+        ambientLightNodePath = self.render.attachNewNode(ambientLight)
+        self.render.setLight(ambientLightNodePath)
+        self.render.setShaderAuto()
 
     def setupSkybox(self):
         """Loads a skybox model if available, otherwise prints an error."""
         try:
-            skybox = loader.loadModel('skybox/skybox.egg')
+            skybox = self.loader.loadModel('skybox/skybox.egg')
             skybox.setScale(50)
             skybox.setBin('background', 1)
             skybox.setDepthWrite(0)
             skybox.setLightOff()
-            skybox.reparentTo(render)
+            skybox.reparentTo(self.render)
         except Exception as e:
             print(f"Could not load skybox: {e}")
 
@@ -417,12 +471,12 @@ class SignLanguageApp(ShowBase):
         # Pause media playback if needed during signing
         if self.media_control_active and self.media_state == "playing":
             self.pause_media()
-        taskMgr.add(self.animateNextPose, "SignAnimation")
+        self.taskMgr.add(self.animateNextPose, "SignAnimation")
 
     def stopAnimation(self):
         """Stop the current sign animation task if running."""
         if self.is_animating:
-            taskMgr.remove("SignAnimation")
+            self.taskMgr.remove("SignAnimation")
             self.is_animating = False
 
     def slideArms(self):
@@ -522,7 +576,7 @@ class SignLanguageApp(ShowBase):
         Set up background task for media control (play/pause).
         Takes no effect until activated.
         """
-        taskMgr.add(self.media_control_task, "MediaControlTask")
+        self.taskMgr.add(self.media_control_task, "MediaControlTask")
 
     def toggle_media_control(self):
         """
@@ -659,7 +713,7 @@ class SignLanguageApp(ShowBase):
         if text and gloss:
             if self.is_animating:
                 return  # Wait for current animation to complete
-            self.start_animation(text)
+            self.start_animation(gloss)
 
 
 # Main entry point, creates and runs the application
