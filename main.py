@@ -474,10 +474,18 @@ class SignLanguageApp(ShowBase):
         self.taskMgr.add(self.animateNextPose, "SignAnimation")
 
     def stopAnimation(self):
-        """Stop the current sign animation task if running."""
+        # Stop any running animation task
         if self.is_animating:
             self.taskMgr.remove("SignAnimation")
             self.is_animating = False
+
+            # Stop any running sequences
+            if hasattr(self, 'current_left_seq') and self.current_left_seq:
+                self.current_left_seq.finish()
+                self.current_left_seq = None
+            if hasattr(self, 'current_right_seq') and self.current_right_seq:
+                self.current_right_seq.finish()
+                self.current_right_seq = None
 
     def slideArms(self):
         """
@@ -498,12 +506,27 @@ class SignLanguageApp(ShowBase):
         Animates each sign or letter in the expanded sequence, applying relevant poses.
         """
         if self.pose_index >= len(self.expanded_sequence):
+
+            #
+            if hasattr(self, 'current_left_seq') and self.current_left_seq and self.current_left_seq.isPlaying():
+                return task.again
+            if hasattr(self, 'current_right_seq') and self.current_right_seq and self.current_right_seq.isPlaying():
+                return task.again
+            #
+
             self.loadSignPoses("default")
             self.pose_index = 0
             self.is_animating = False
             self.status_text.setText("Animation Complete")
             self.current_pose = ""
+
             self.signing_complete = True
+
+            #
+            self.current_left_seq = None
+            self.current_right_seq = None
+            #
+
             # Resume media playback after signing if needed
             if self.media_control_active and self.media_state == "paused":
                 self.resume_media()
@@ -523,26 +546,27 @@ class SignLanguageApp(ShowBase):
             return task.again
 
         # Animation sequence for the current sign or letter
-        sequence = []
-        time = 0.05  # Duration per movement
+        left_sequence = []
+        right_sequence = []
+        time = 0.15
 
-        def addFingerLerp(hand_data, finger_map):
+        def addFingerLerp(hand_data, finger_map, sequence_list):
             if "fingers" not in hand_data:
                 return
             for name, parts in finger_map.items():
                 if name in hand_data["fingers"]:
                     for part, pose_data in zip(parts, hand_data["fingers"][name]):
-                        sequence.append(LerpPosInterval(part, 0, LVecBase3f(*pose_data["pos"])))
-                        sequence.append(LerpHprInterval(part, 0, LVecBase3f(*pose_data["hpr"])))
+                        sequence_list.append(LerpPosInterval(part, 0, LVecBase3f(*pose_data["pos"])))
+                        sequence_list.append(LerpHprInterval(part, 0, LVecBase3f(*pose_data["hpr"])))
 
         def addHandAndFingers(pose):
             l = pose["leftHand"]
             r = pose["rightHand"]
-            sequence.extend([
+
+            # Add left arm and finger movements to left sequence
+            left_sequence.extend([
                 LerpPosInterval(self.larm, time, LVecBase3f(*l["pos"])),
-                LerpHprInterval(self.larm, time, LVecBase3f(*l["hpr"])),
-                LerpPosInterval(self.rarm, time, LVecBase3f(*r["pos"])),
-                LerpHprInterval(self.rarm, time, LVecBase3f(*r["hpr"]))
+                LerpHprInterval(self.larm, time, LVecBase3f(*l["hpr"]))
             ])
             addFingerLerp(l, {
                 "thumb": [self.lthumb1, self.lthumb2],
@@ -550,14 +574,20 @@ class SignLanguageApp(ShowBase):
                 "middle": [self.lmiddle1, self.lmiddle2, self.lmiddle3],
                 "ring": [self.lring1, self.lring2, self.lring3],
                 "pinky": [self.lpinky1, self.lpinky2, self.lpinky3]
-            })
+            }, left_sequence)
+
+            # Add right arm and finger movements to right sequence
+            right_sequence.extend([
+                LerpPosInterval(self.rarm, time, LVecBase3f(*r["pos"])),
+                LerpHprInterval(self.rarm, time, LVecBase3f(*r["hpr"]))
+            ])
             addFingerLerp(r, {
                 "thumb": [self.rthumb1, self.rthumb2],
                 "index": [self.rindex1, self.rindex2, self.rindex3],
                 "middle": [self.rmiddle1, self.rmiddle2, self.rmiddle3],
                 "ring": [self.rring1, self.rring2, self.rring3],
                 "pinky": [self.rpinky1, self.rpinky2, self.rpinky3]
-            })
+            }, right_sequence)
 
         if isinstance(poses, list):
             for pose in poses:
@@ -565,8 +595,22 @@ class SignLanguageApp(ShowBase):
         else:
             addHandAndFingers(poses)
 
-        Sequence(*sequence).start()
+        # Create and start both sequences simultaneously
+        self.current_left_seq = None
+        self.current_right_seq = None
+
+        if left_sequence:
+            self.current_left_seq = Sequence(*left_sequence)
+            self.current_left_seq.start()
+
+        if right_sequence:
+            self.current_right_seq = Sequence(*right_sequence)
+            self.current_right_seq.start()
+
+
         self.status_text.setText(f"Signing: {self.current_text} ('{pose_name}')")
+
+
         task.delayTime = 1.5  # Wait before the next pose
         self.pose_index += 1
         return task.again
