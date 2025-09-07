@@ -26,7 +26,7 @@ class ContinuousSpeechGloss:
     Continuously recognizes speech, converts it to sign language gloss,
     and passes results to a callback or queue.
     """
-    def __init__(self, model_path="vosk-model-small-en-us-0.15", callback=None):
+    def __init__(self, model_path="vosk-model-small-en-in-0.4", callback=None):
         # Ensure required nltk resources are available
         try:
             nltk.data.find('tokenizers/punkt')
@@ -51,6 +51,8 @@ class ContinuousSpeechGloss:
             "am": "",
             "is": "",
             "'s": "",
+            "'re": "",
+            "'ve": "",
             "are": "",
             "was": "",
             "were": "",
@@ -95,7 +97,10 @@ class ContinuousSpeechGloss:
             "okay": "OK",
             "like": "LIKE",
             "help": "HELP",
-            "hello":"hi"
+            "hello":"HI",
+            "talk":"SPEAK",
+            "talking": "SPEAK",
+            "learned":"LEARN"
         }
 
         self.model_path = model_path
