@@ -53,6 +53,7 @@ class ContinuousSpeechGloss:
             "am": "",
             "is": "",
             "'s": "",
+            "n't": "",
             "'re": "",
             "'ve": "",
             "are": "",
@@ -102,7 +103,9 @@ class ContinuousSpeechGloss:
             "hello":"HI",
             "talk":"SPEAK",
             "talking": "SPEAK",
-            "learned":"LEARN"
+            "learned":"LEARN",
+            "trying":"TRY",
+            "coached":"coach"
         }
 
         self.model_path = model_path
@@ -250,7 +253,7 @@ class SignLanguageApp(ShowBase):
 
         # Media control state variables
         self.media_control_active = False
-        self.play_interval = 5
+        self.play_interval = 6
         self.pause_interval = 5
         self.last_media_action_time = 0
         self.media_state = "paused"
