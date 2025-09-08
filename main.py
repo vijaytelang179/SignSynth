@@ -28,12 +28,20 @@ class ContinuousSpeechGloss:
     """
     def __init__(self, model_path="vosk-model-small-en-in-0.4", callback=None):
         # Ensure required nltk resources are available
+        import nltk
+
         try:
             nltk.data.find('tokenizers/punkt')
             nltk.data.find('corpora/stopwords')
+            nltk.data.find('taggers/averaged_perceptron_tagger')
+            nltk.data.find('corpora/wordnet')
+            nltk.data.find('corpora/omw-1.4')
         except LookupError:
             nltk.download('punkt', quiet=True)
             nltk.download('stopwords', quiet=True)
+            nltk.download('averaged_perceptron_tagger', quiet=True)
+            nltk.download('wordnet', quiet=True)
+            nltk.download('omw-1.4', quiet=True)
 
         # Set up stop words and pronouns required for glossing
         self.stop_words = set(stopwords.words('english')) - {
@@ -553,7 +561,7 @@ class SignLanguageApp(ShowBase):
         # Animation sequence for the current sign or letter
         left_sequence = []
         right_sequence = []
-        time = 0.15
+        time = 0.05
 
         def addFingerLerp(hand_data, finger_map, sequence_list):
             if "fingers" not in hand_data:
