@@ -108,7 +108,8 @@ class ContinuousSpeechGloss:
             "coached":"COACH",
             "habits":"HABIT",
             "millions":"MILLION",
-            "skills":"SKILL"
+            "skills":"SKILL",
+            "thinking":"OVERTHINKING"
         }
 
         self.model_path = model_path
@@ -256,8 +257,8 @@ class SignLanguageApp(ShowBase):
 
         # Media control state variables
         self.media_control_active = False
-        self.play_interval = 6
-        self.pause_interval = 5
+        self.play_interval = 7
+        self.pause_interval = 7
         self.last_media_action_time = 0
         self.media_state = "paused"
 
