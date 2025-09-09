@@ -105,7 +105,10 @@ class ContinuousSpeechGloss:
             "talking": "SPEAK",
             "learned":"LEARN",
             "trying":"TRY",
-            "coached":"coach"
+            "coached":"COACH",
+            "habits":"HABIT",
+            "millions":"MILLION",
+            "skills":"SKILL"
         }
 
         self.model_path = model_path
