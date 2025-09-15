@@ -31,9 +31,11 @@ class ContinuousSpeechGloss:
         import nltk
 
         try:
+            nltk.data.find('tokenizers/punkt_tab')
             nltk.data.find('tokenizers/punkt')
             nltk.data.find('corpora/stopwords')
         except LookupError:
+            nltk.download('punkt_tab', quiet=True)
             nltk.download('punkt', quiet=True)
             nltk.download('stopwords', quiet=True)
 
@@ -321,7 +323,8 @@ class SignLanguageApp(ShowBase):
 
     def loadModels(self):
         """Load 3D character model, arms, and attach to scene graph."""
-        self.torso = self.loader.loadModel('character/torso.glb')
+        # self.torso = self.loader.loadModel('character/torso.glb')
+        self.torso = self.loader.loadModel('character/body.glb')
         self.torso.setPos(0, 0, -1.5)
         self.torso.reparentTo(self.render)
         self.torso.setScale(0.7)
@@ -376,7 +379,8 @@ class SignLanguageApp(ShowBase):
         mainLight = DirectionalLight('main light')
         mainLight.setShadowCaster(True)
         mainLightNodePath = self.render.attachNewNode(mainLight)
-        mainLightNodePath.setHpr(0, -70, 0)
+        # mainLightNodePath.setHpr(0, -70, 0)
+        mainLightNodePath.setHpr(0, -50, 0)
         self.render.setLight(mainLightNodePath)
 
         ambientLight = AmbientLight('ambient light')
