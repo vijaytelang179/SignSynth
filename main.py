@@ -17,7 +17,7 @@ from direct.showbase.ShowBase import ShowBase
 from direct.task import Task
 from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
-from panda3d.core import LVecBase3f, DirectionalLight, AmbientLight
+from panda3d.core import LVecBase3f, DirectionalLight, AmbientLight, TextNode
 from vosk import Model, KaldiRecognizer
 
 
@@ -26,7 +26,8 @@ class ContinuousSpeechGloss:
     Continuously recognizes speech, converts it to sign language gloss,
     and passes results to a callback or queue.
     """
-    def __init__(self, model_path="vosk-model-small-en-in-0.4", callback=None):
+
+    def __init__(self, model_path="vosk-model-small-en-us-0.15", callback=None):
         # Ensure required nltk resources are available
         import nltk
 
@@ -63,8 +64,6 @@ class ContinuousSpeechGloss:
             "were": "",
             "going": "GO",
             "go": "GO",
-            "want": "WANT",
-            "have": "HAVE",
             "had": "HAVE",
             "don't": "NOT",
             "not": "NOT",
@@ -88,30 +87,16 @@ class ContinuousSpeechGloss:
             "where": "WHERE",
             "when": "WHEN",
             "why": "WHY",
-            "how": "HOW",
-            "need": "NEED",
-            "can": "CAN",
-            "will": "WILL",
-            "should": "SHOULD",
-            "must": "MUST",
-            "good": "GOOD",
-            "bad": "BAD",
-            "happy": "HAPPY",
-            "sad": "SAD",
-            "yes": "YES",
-            "okay": "OK",
-            "like": "LIKE",
-            "help": "HELP",
-            "hello":"HI",
-            "talk":"SPEAK",
+            "hello": "HI",
+            "talk": "SPEAK",
             "talking": "SPEAK",
-            "learned":"LEARN",
-            "trying":"TRY",
-            "coached":"COACH",
-            "habits":"HABIT",
-            "millions":"MILLION",
-            "skills":"SKILL",
-            "thinking":"OVERTHINKING"
+            "learned": "LEARN",
+            "trying": "TRY",
+            "coached": "COACH",
+            "habits": "HABIT",
+            "millions": "MILLION",
+            "skills": "SKILL",
+            "thinking": "OVERTHINKING"
         }
 
         self.model_path = model_path
@@ -226,6 +211,7 @@ class SignLanguageApp(ShowBase):
     Main application class: integrates 3D model, sign pose animation, UI,
     speech recognition, and optional media control for sign language display.
     """
+
     def __init__(self):
         ShowBase.__init__(self)
 
@@ -259,8 +245,8 @@ class SignLanguageApp(ShowBase):
 
         # Media control state variables
         self.media_control_active = False
-        self.play_interval = 7
-        self.pause_interval = 7
+        self.play_interval = 5
+        self.pause_interval = 5
         self.last_media_action_time = 0
         self.media_state = "paused"
 
@@ -282,43 +268,72 @@ class SignLanguageApp(ShowBase):
 
     def setup_ui(self):
         """
-        Create on-screen user interface elements for:
-          - Status display
-          - Control buttons for speech and media control
+        Create a consolidated, on-screen user interface panel.
         """
-        self.status_text = OnscreenText(
-            text="Ready for speech input. Media control inactive.",
-            pos=(0, -0.55),
-            scale=0.06,
-            fg=(1, 1, 1, 1),
-            wordwrap=30,
-            mayChange=True
+        # Define some colors for consistency
+        COLOR_ACTIVE = (0.9, 0.3, 0.3, 1)
+        COLOR_INACTIVE = (0.3, 0.6, 0.9, 1)
+        FRAME_COLOR = (0.1, 0.1, 0.1, 0)
+        TEXT_COLOR = (1, 1, 1, 1)
+
+        # Main UI Frame - Smaller and positioned at the bottom
+        self.ui_frame = DirectFrame(
+            frameColor=FRAME_COLOR,
+            frameSize=(-1.3, 1.3, -0.25, 0.25),
+            pos=(0.4, 0, -0.7)
         )
 
-        self.control_frame = DirectFrame(
-            frameColor=(0.2, 0.2, 0.2, 0.7),
-            frameSize=(-0.7, 0.7, -0.15, 0.15),
-            pos=(0, 0, -0.8)
+        self.top_bar_frame = DirectFrame(
+            frameColor=FRAME_COLOR,
+            frameSize=(-1.3, 1.3, -0.25, 0.25),
+            pos=(0.1, 0, 0.5)
         )
 
+        # --- Information Display Area (on the left) ---
+        # Label for recognized text
+        self.recognized_text_label = OnscreenText(
+            parent=self.ui_frame, text="Current Sign:", pos=(-1.2, 0.1), scale=0.06,
+            fg=TEXT_COLOR, align=TextNode.ALeft, mayChange=False
+        )
+        # Dynamic text for recognized speech
+        self.recognized_text_node = OnscreenText(
+            parent=self.ui_frame, text="...", pos=(-0.65, 0.1), scale=0.06,
+            fg=TEXT_COLOR, align=TextNode.ALeft, mayChange=True
+        )
+        # Label for gloss text
+        self.gloss_text_label = OnscreenText(
+            parent=self.ui_frame, text="Signing (Gloss):", pos=(-1.2, -0.1), scale=0.06,
+            fg=TEXT_COLOR, align=TextNode.ALeft, mayChange=False
+        )
+        # Dynamic text for gloss
+        self.gloss_text_node = OnscreenText(
+            parent=self.ui_frame, text="Ready to listen.", pos=(-0.65, -0.1), scale=0.06,
+            fg=TEXT_COLOR, align=TextNode.ALeft, wordwrap=20, mayChange=True
+        )
+
+        # --- Control Buttons Area (stacked on the right) ---
         self.speech_toggle_button = DirectButton(
-            parent=self.control_frame,
-            text="Stop Speech Recognition",
-            text_scale=0.04,
-            frameSize=(-0.3, 0.3, -0.06, 0.06),
+            parent=self.top_bar_frame,
+            text="Speech",
+            text_scale=0.05,
+            frameSize=(-0.2, 0.2, -0.08, 0.08),
             command=self.toggle_speech_recognition,
-            pos=(-0.35, 0, 0),
-            frameColor=(0.9, 0.3, 0.3, 1)
+            pos=(0.6, 0, 0.1),
+            frameColor=COLOR_ACTIVE,
+            relief='raised',
+            borderWidth=(0.01, 0.01)
         )
 
         self.media_toggle_button = DirectButton(
-            parent=self.control_frame,
-            text="Start Media Control",
-            text_scale=0.04,
-            frameSize=(-0.3, 0.3, -0.06, 0.06),
+            parent=self.top_bar_frame,
+            text="Media Control",
+            text_scale=0.05,
+            frameSize=(-0.2, 0.2, -0.08, 0.08),
             command=self.toggle_media_control,
-            pos=(0.35, 0, 0),
-            frameColor=(0.3, 0.6, 0.9, 1)
+            pos=(0.6, 0, -0.1),
+            frameColor=COLOR_INACTIVE,
+            relief='raised',
+            borderWidth=(0.01, 0.01)
         )
 
     def loadModels(self):
@@ -330,9 +345,9 @@ class SignLanguageApp(ShowBase):
         self.torso.setScale(0.7)
 
         # Load left and right arms as children
-        self.rarm = self.loader.loadModel('character/RArmX.glb')
+        self.rarm = self.loader.loadModel('character/RArm.glb')
         self.rarm.reparentTo(self.torso)
-        self.larm = self.loader.loadModel('character/LArmX.glb')
+        self.larm = self.loader.loadModel('character/LArm.glb')
         self.larm.reparentTo(self.torso)
         # Set up references to finger parts for each arm
         self.setup_arm_details()
@@ -379,8 +394,8 @@ class SignLanguageApp(ShowBase):
         mainLight = DirectionalLight('main light')
         mainLight.setShadowCaster(True)
         mainLightNodePath = self.render.attachNewNode(mainLight)
-        # mainLightNodePath.setHpr(0, -70, 0)
-        mainLightNodePath.setHpr(0, -50, 0)
+        mainLightNodePath.setHpr(0, -40, 0)
+        # mainLightNodePath.setHpr(0, -50, 0)
         self.render.setLight(mainLightNodePath)
 
         ambientLight = AmbientLight('ambient light')
@@ -431,26 +446,34 @@ class SignLanguageApp(ShowBase):
             if "thumb" in f:
                 applyFingerPose([self.lthumb1, self.lthumb2], f["thumb"])
             if "index" in f:
-                applyFingerPose([self.lindex1, self.lindex2, self.lindex3], f["index"])
+                applyFingerPose([self.lindex1, self.lindex2,
+                                self.lindex3], f["index"])
             if "middle" in f:
-                applyFingerPose([self.lmiddle1, self.lmiddle2, self.lmiddle3], f["middle"])
+                applyFingerPose([self.lmiddle1, self.lmiddle2,
+                                self.lmiddle3], f["middle"])
             if "ring" in f:
-                applyFingerPose([self.lring1, self.lring2, self.lring3], f["ring"])
+                applyFingerPose(
+                    [self.lring1, self.lring2, self.lring3], f["ring"])
             if "pinky" in f:
-                applyFingerPose([self.lpinky1, self.lpinky2, self.lpinky3], f["pinky"])
+                applyFingerPose([self.lpinky1, self.lpinky2,
+                                self.lpinky3], f["pinky"])
 
         if "fingers" in r:
             f = r["fingers"]
             if "thumb" in f:
                 applyFingerPose([self.rthumb1, self.rthumb2], f["thumb"])
             if "index" in f:
-                applyFingerPose([self.rindex1, self.rindex2, self.rindex3], f["index"])
+                applyFingerPose([self.rindex1, self.rindex2,
+                                self.rindex3], f["index"])
             if "middle" in f:
-                applyFingerPose([self.rmiddle1, self.rmiddle2, self.rmiddle3], f["middle"])
+                applyFingerPose([self.rmiddle1, self.rmiddle2,
+                                self.rmiddle3], f["middle"])
             if "ring" in f:
-                applyFingerPose([self.rring1, self.rring2, self.rring3], f["ring"])
+                applyFingerPose(
+                    [self.rring1, self.rring2, self.rring3], f["ring"])
             if "pinky" in f:
-                applyFingerPose([self.rpinky1, self.rpinky2, self.rpinky3], f["pinky"])
+                applyFingerPose([self.rpinky1, self.rpinky2,
+                                self.rpinky3], f["pinky"])
 
     def expandPoseSequence(self, sequence):
         """
@@ -477,11 +500,11 @@ class SignLanguageApp(ShowBase):
         self.expanded_sequence = self.expandPoseSequence(words)
 
         if not self.expanded_sequence:
-            self.status_text.setText("No valid signs found in text")
+            self.gloss_text_node.setText("No valid signs found in text")
             self.signing_complete = True
             return
 
-        self.status_text.setText(f"Signing: {self.current_text}")
+        self.gloss_text_node.setText(f"Signing: {self.current_text}")
         self.pose_index = 0
         self.is_animating = True
         self.signing_complete = False
@@ -513,7 +536,8 @@ class SignLanguageApp(ShowBase):
         time = 0.2
         sequence = Sequence(
             LerpPosInterval(self.larm, time, self.larm.getPos()),
-            LerpPosInterval(self.rarm, time, self.rarm.getPos() + LVecBase3f(-slide_distance, 0, 0)),
+            LerpPosInterval(self.rarm, time, self.rarm.getPos() +
+                            LVecBase3f(-slide_distance, 0, 0)),
             LerpPosInterval(self.larm, time, self.larm.getPos()),
             LerpPosInterval(self.rarm, time, self.rarm.getPos())
         )
@@ -535,15 +559,13 @@ class SignLanguageApp(ShowBase):
             self.loadSignPoses("default")
             self.pose_index = 0
             self.is_animating = False
-            self.status_text.setText("Animation Complete")
+            self.gloss_text_node.setText("Animation Complete")
             self.current_pose = ""
 
             self.signing_complete = True
 
-            #
             self.current_left_seq = None
             self.current_right_seq = None
-            #
 
             # Resume media playback after signing if needed
             if self.media_control_active and self.media_state == "paused":
@@ -566,7 +588,7 @@ class SignLanguageApp(ShowBase):
         # Animation sequence for the current sign or letter
         left_sequence = []
         right_sequence = []
-        time = 0.05
+        time = 0.005
 
         def addFingerLerp(hand_data, finger_map, sequence_list):
             if "fingers" not in hand_data:
@@ -574,8 +596,10 @@ class SignLanguageApp(ShowBase):
             for name, parts in finger_map.items():
                 if name in hand_data["fingers"]:
                     for part, pose_data in zip(parts, hand_data["fingers"][name]):
-                        sequence_list.append(LerpPosInterval(part, 0, LVecBase3f(*pose_data["pos"])))
-                        sequence_list.append(LerpHprInterval(part, 0, LVecBase3f(*pose_data["hpr"])))
+                        sequence_list.append(LerpPosInterval(
+                            part, 0.01, LVecBase3f(*pose_data["pos"])))
+                        sequence_list.append(LerpHprInterval(
+                            part, 0.01, LVecBase3f(*pose_data["hpr"])))
 
         def addHandAndFingers(pose):
             l = pose["leftHand"]
@@ -625,9 +649,8 @@ class SignLanguageApp(ShowBase):
             self.current_right_seq = Sequence(*right_sequence)
             self.current_right_seq.start()
 
-
-        self.status_text.setText(f"Signing: {self.current_text} ('{pose_name}')")
-
+        self.gloss_text_node.setText(f"Signing: {self.current_text}")
+        self.recognized_text_node.setText(f"{pose_name.upper()}")
 
         task.delayTime = 1.5  # Wait before the next pose
         self.pose_index += 1
@@ -648,22 +671,25 @@ class SignLanguageApp(ShowBase):
             self.media_control_active = not self.media_control_active
 
             if self.media_control_active:
-                self.media_toggle_button["text"] = "Stop Media Control"
+                self.media_toggle_button["text"] = "Media Control"
                 self.media_toggle_button["frameColor"] = (0.9, 0.3, 0.3, 1)
-                self.status_text.setText("Media control starting (switch to media tab)")
+                self.gloss_text_node.setText(
+                    "Media control starting (switch to media tab)")
                 self.last_media_action_time = time.time()
                 self.media_state = "starting"
-                print("Media control starting - switch to your media tab within 3 seconds!")
+                print(
+                    "Media control starting - switch to your media tab within 3 seconds!")
             else:
-                self.media_toggle_button["text"] = "Start Media Control"
+                self.media_toggle_button["text"] = "Media Control"
                 self.media_toggle_button["frameColor"] = (0.3, 0.6, 0.9, 1)
-                self.status_text.setText("Speech recognition active, media control inactive")
+                self.gloss_text_node.setText(
+                    "Speech recognition active, media control inactive")
                 self.media_state = "paused"
                 print("Media control stopped")
 
         except Exception as e:
             print(f"Error toggling media control: {str(e)}")
-            self.status_text.setText(f"Error: {str(e)}")
+            self.gloss_text_node.setText(f"Error: {str(e)}")
 
     def media_control_task(self, task):
         """
@@ -682,7 +708,7 @@ class SignLanguageApp(ShowBase):
             # After initial delay, start playback
             self.last_media_action_time = current_time
             self.media_state = "playing"
-            self.status_text.setText("Media playing")
+            self.gloss_text_node.setText("Media playing")
 
         elif self.media_state == "playing" and elapsed >= self.play_interval:
             self.pause_media()
@@ -696,7 +722,7 @@ class SignLanguageApp(ShowBase):
         self.simulate_space_press()
         self.last_media_action_time = time.time()
         self.media_state = "paused"
-        self.status_text.setText("Media paused")
+        self.gloss_text_node.setText("Media paused")
 
     def resume_media(self):
         """
@@ -705,7 +731,7 @@ class SignLanguageApp(ShowBase):
         self.simulate_space_press()
         self.last_media_action_time = time.time()
         self.media_state = "playing"
-        self.status_text.setText("Media playing")
+        self.gloss_text_node.setText("Media playing")
 
     def simulate_space_press(self):
         """
@@ -717,7 +743,8 @@ class SignLanguageApp(ShowBase):
                 shell = win32com.client.Dispatch("WScript.Shell")
                 shell.SendKeys(" ", 0)
             except ImportError:
-                print("Could not import win32com.client - media control may not work properly")
+                print(
+                    "Could not import win32com.client - media control may not work properly")
         else:
             try:
                 import pyautogui
@@ -726,55 +753,42 @@ class SignLanguageApp(ShowBase):
                 print("Could not import pyautogui - media control may not work properly")
 
     def start_speech_recognition(self):
-        """
-        Launch the speech recognition processor and update UI state accordingly.
-        """
         try:
             if not self.speech_processor:
                 self.speech_processor = ContinuousSpeechGloss(callback=self.handle_speech_result)
-            success = self.speech_processor.start()
-            if success:
+            if self.speech_processor.start():
                 self.speech_recognition_active = True
-                self.speech_toggle_button["text"] = "Stop Speech Recognition"
+                self.speech_toggle_button["text"] = "Speech"
                 self.speech_toggle_button["frameColor"] = (0.9, 0.3, 0.3, 1)
-                self.status_text.setText("Speech recognition active")
+                self.gloss_text_node.setText("Speech active. Ready to listen.")
             else:
-                self.status_text.setText("Error: Speech recognition failed to start")
+                self.gloss_text_node.setText("Error: Speech failed to start")
         except Exception as e:
-            error_msg = f"Error starting speech recognition: {str(e)}"
-            print(error_msg)
-            self.status_text.setText("Error: Failed to start speech recognition")
+            self.gloss_text_node.setText(f"Error: {str(e)}")
 
     def toggle_speech_recognition(self):
-        """
-        Toggle speech recognition on/off and update UI button and state.
-        """
         if not self.speech_recognition_active:
             self.start_speech_recognition()
         else:
             try:
-                if self.speech_processor:
-                    success = self.speech_processor.stop()
-                    if success:
-                        self.speech_recognition_active = False
-                        self.speech_toggle_button["text"] = "Start Speech Recognition"
-                        self.speech_toggle_button["frameColor"] = (0.3, 0.6, 0.9, 1)
-                        self.status_text.setText("Speech recognition inactive")
-                    else:
-                        self.status_text.setText("Error: Failed to stop speech recognition")
+                if self.speech_processor and self.speech_processor.stop():
+                    self.speech_recognition_active = False
+                    self.speech_toggle_button["text"] = "Speech"
+                    self.speech_toggle_button["frameColor"] = (0.3, 0.6, 0.9, 1)
+                    self.gloss_text_node.setText("Speech inactive.")
+                else:
+                    self.gloss_text_node.setText("Error: Failed to stop speech")
             except Exception as e:
-                error_msg = f"Error stopping speech recognition: {str(e)}"
-                print(error_msg)
-                self.status_text.setText("Error: Failed to stop speech recognition")
+                self.gloss_text_node.setText(f"Error: {str(e)}")
 
     def handle_speech_result(self, text, gloss):
         """
         Called whenever new speech is recognized.
         Updates UI and triggers sign animation (unless an animation is already running).
         """
-        if text and gloss:
-            if self.is_animating:
-                return  # Wait for current animation to complete
+        if text and gloss and not self.is_animating:
+            self.recognized_text_node.setText(text)
+            self.gloss_text_node.setText(gloss)
             self.start_animation(gloss)
 
 
