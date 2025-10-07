@@ -1,11 +1,37 @@
 import json
 import queue
 import string
-import sys
+import os,sys
 import threading
 import time
 
-import nltk
+import os, sys
+from panda3d.core import loadPrcFileData, Filename
+
+# Determine runtime path for onefile exe
+if getattr(sys, 'frozen', False):
+    base_path = sys._MEIPASS
+    # Tell Panda3D where to find display plugins
+    plugins_dir = os.path.join(base_path, "plugins")
+    plugins_dir = Filename.fromOsSpecific(plugins_dir).toOsSpecific()
+    loadPrcFileData("", f"plugin-path {plugins_dir}")
+
+    # Force OpenGL display
+    loadPrcFileData("", "load-display pandagl")
+    loadPrcFileData("", "aux-display tinydisplay")
+    loadPrcFileData("", "window-title SignSynth")
+else:
+    base_path = os.path.abspath(".")
+
+
+if getattr(sys, 'frozen', False):
+    # When running as exe
+    dll_path = os.path.join(sys._MEIPASS, "vosk")
+    if os.path.exists(dll_path):
+        os.add_dll_directory(dll_path)
+
+from panda3d.core import LVecBase3f, DirectionalLight, AmbientLight, TextNode
+
 import pyaudio
 import win32com.client
 from direct.gui.DirectButton import DirectButton
@@ -17,13 +43,20 @@ from direct.showbase.ShowBase import ShowBase
 from direct.task import Task
 from nltk.corpus import stopwords, wordnet
 from nltk.tokenize import word_tokenize
-from panda3d.core import LVecBase3f, DirectionalLight, AmbientLight, TextNode
 from vosk import Model, KaldiRecognizer
 from nltk import pos_tag, WordNetLemmatizer
 
 import nltk
-print(nltk.data.path)
 
+print(f"Base path: {base_path}")
+
+for root, dirs, files in os.walk(base_path):
+    level = root.replace(base_path, "").count(os.sep)
+    indent = " " * 4 * level
+    print(f"{indent}{os.path.basename(root)}/")
+    subindent = " " * 4 * (level + 1)
+    for f in files:
+        print(f"{subindent}{f}")
 
 try:
     nltk.data.find('tokenizers/punkt_tab')
@@ -48,6 +81,13 @@ class ContinuousSpeechGloss:
 
     def __init__(self, model_path="vosk-model-small-en-us-0.15", callback=None):
         # Ensure required nltk resources are available
+        if getattr(sys, 'frozen', False):  # if running from .exe
+            base_path = sys._MEIPASS
+        else:
+            base_path = os.path.dirname(__file__)
+
+        model_path = os.path.join(base_path, "vosk-model-small-en-us-0.15")
+        model = Model(model_path)
 
 
         self.lemmatizer = WordNetLemmatizer()
@@ -275,6 +315,7 @@ class SignLanguageApp(ShowBase):
         self.speech_processor = None
 
         # Animation flags
+        self.is_animating = False
         self.signing_complete = True  # Signals whether signing is in progress
 
         # Set up the user interface
@@ -360,15 +401,21 @@ class SignLanguageApp(ShowBase):
         """Load 3D character model, arms, and attach to scene graph."""
         # self.torso = self.loader.loadModel('character/torso.glb')
         self.torso = self.loader.loadModel('character/body.glb')
-        self.torso.setPos(0, 0, -1.5)
         self.torso.reparentTo(self.render)
+        self.torso.setPos(0, 0, -1.5)
         self.torso.setScale(0.7)
+        self.torso.setHpr(0, 0, 0)
 
         # Load left and right arms as children
         self.rarm = self.loader.loadModel('character/RArm.glb')
         self.rarm.reparentTo(self.torso)
+        self.rarm.setPos(2.2, -1.3, 1.1)
+        self.rarm.setHpr(50, 90, -90)
+
         self.larm = self.loader.loadModel('character/LArm.glb')
         self.larm.reparentTo(self.torso)
+        self.rarm.setPos(-2.2, -1.3, 1.1)
+        self.rarm.setHpr(40, 90, 0)
         # Set up references to finger parts for each arm
         self.setup_arm_details()
 
