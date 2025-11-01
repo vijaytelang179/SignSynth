@@ -10,19 +10,16 @@ venv_path = r'C:\Users\DELL\PycharmProjects\render3D\.venv\Lib\site-packages'
 project_path = r'C:\Users\DELL\PycharmProjects\SignSynth'
 panda3d_path = os.path.join(project_path, '.venv', 'Lib', 'site-packages', 'panda3d')
 
-# Find NLTK data - check multiple possible locations
 nltk_data_dirs = []
 for path in nltk.data.path:
     if os.path.exists(path):
         nltk_data_dirs.append(path)
         print(f"Found NLTK data at: {path}")
 
-# Prepare NLTK data entries
 nltk_datas = []
 if nltk_data_dirs:
-    nltk_data_dir = nltk_data_dirs[0]  # Use first valid path
+    nltk_data_dir = nltk_data_dirs[0]
 
-    # Only add directories that actually exist
     for subdir in ['tokenizers', 'corpora', 'taggers']:
         src = os.path.join(nltk_data_dir, subdir)
         if os.path.exists(src):
@@ -36,21 +33,19 @@ a = Analysis(
     pathex=[],
     binaries=[
         (os.path.join(project_path, '.venv', 'Lib', 'site-packages', 'vosk', 'libvosk.dll'), 'vosk'),
-        # Panda3D display plugins
         (os.path.join(panda3d_path, 'libpandagl.dll'), 'plugins'),
         (os.path.join(panda3d_path, 'libp3tinydisplay.dll'), 'plugins'),
         (os.path.join(panda3d_path, 'libpandadx9.dll'), 'plugins'),
         (os.path.join(panda3d_path, 'cgD3D9.dll'), 'plugins'),
         (os.path.join(panda3d_path, 'libp3assimp.dll'), 'plugins'),
+        (os.path.join(panda3d_path, 'libp3ptloader.dll'), 'plugins'),
 
-        # All other Panda3D DLLs
         (os.path.join(panda3d_path, 'libp3direct.dll'), '.'),
         (os.path.join(panda3d_path, 'libp3dtool.dll'), '.'),
         (os.path.join(panda3d_path, 'libp3dtoolconfig.dll'), '.'),
         (os.path.join(panda3d_path, 'libp3interrogatedb.dll'), '.'),
         (os.path.join(panda3d_path, 'libp3ffmpeg.dll'), '.'),
         (os.path.join(panda3d_path, 'libp3fmod_audio.dll'), '.'),
-        (os.path.join(panda3d_path, 'libp3ptloader.dll'), '.'),
         (os.path.join(panda3d_path, 'libp3vision.dll'), '.'),
         (os.path.join(panda3d_path, 'libp3vrpn.dll'), '.'),
         (os.path.join(panda3d_path, 'libpanda.dll'), '.'),
@@ -66,12 +61,12 @@ a = Analysis(
         (os.path.join(panda3d_path, '*.pyd'), '.'),
     ],
     datas=[
-        (os.path.join(project_path, 'sign_poses.json'), '.'),
+        (os.path.join(project_path, 'sign_poses.json'), './'),
         (os.path.join(project_path, 'character'), 'character'),
         (os.path.join(project_path, 'skybox'), 'skybox'),
         (os.path.join(project_path, 'vosk-model-small-en-us-0.15'), 'vosk-model-small-en-us-0.15'),
         (os.path.join(panda3d_path, 'etc'), 'etc'),
-    ] + nltk_datas,  # Add NLTK data if found
+    ] + nltk_datas,
     hiddenimports=[
         'panda3d.core',
         'direct.showbase.ShowBase',
@@ -109,13 +104,23 @@ exe = EXE(
     a.datas,
     [],
     name='SignSynth',
-    debug=True,
+    debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=True,
+    console=False,
     disable_windowed_traceback=False,
     icon=r'C:\Users\DELL\Downloads\SignSynth.ico',
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=True,
+    name='SignSynth'
 )

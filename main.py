@@ -1,11 +1,50 @@
 import json
 import queue
 import string
-import sys
+import os,sys
 import threading
 import time
 
-import nltk
+import os, sys
+from PyQt5.QtWidgets import QApplication
+from loading_screen import LoadingScreen
+
+from panda3d.core import loadPrcFileData, Filename
+
+# Determine runtime path for onefile exe
+if getattr(sys, 'frozen', False):
+    # --- This is the FROZEN (EXE) path ---
+    base_path = sys._MEIPASS
+
+    # Tell Panda3D where to find display plugins
+    plugins_dir = os.path.join(base_path, "plugins")
+    plugins_dir = Filename.fromOsSpecific(plugins_dir).toOsSpecific()
+    loadPrcFileData("", f"plugin-path {plugins_dir}")
+
+    # Add the exe's root directory to the Panda3D model search path
+    model_path = Filename.fromOsSpecific(base_path).toOsSpecific()
+    loadPrcFileData("", f"model-path {model_path}")
+
+    # Force OpenGL display
+    loadPrcFileData("", "load-display pandagl")
+    loadPrcFileData("", "aux-display tinydisplay")
+    loadPrcFileData("", "window-title SignSynth")
+else:
+    # --- This is the DEVELOPMENT (PY) path ---
+    base_path = os.path.abspath(os.path.dirname(__file__))
+
+    model_path = Filename.fromOsSpecific(base_path).toOsSpecific()
+    loadPrcFileData("", f"model-path {model_path}")
+
+
+if getattr(sys, 'frozen', False):
+    # When running as exe
+    dll_path = os.path.join(sys._MEIPASS, "vosk")
+    if os.path.exists(dll_path):
+        os.add_dll_directory(dll_path)
+
+from panda3d.core import LVecBase3f, DirectionalLight, AmbientLight, TextNode
+
 import pyaudio
 import win32com.client
 from direct.gui.DirectButton import DirectButton
@@ -15,11 +54,27 @@ from direct.interval.IntervalGlobal import Sequence
 from direct.interval.LerpInterval import LerpPosInterval, LerpHprInterval
 from direct.showbase.ShowBase import ShowBase
 from direct.task import Task
-from nltk.corpus import stopwords
+from nltk.corpus import stopwords, wordnet
 from nltk.tokenize import word_tokenize
-from panda3d.core import LVecBase3f, DirectionalLight, AmbientLight, TextNode
 from vosk import Model, KaldiRecognizer
+from nltk import pos_tag, WordNetLemmatizer
 
+import nltk
+
+try:
+    nltk.data.find('tokenizers/punkt_tab')
+    nltk.data.find('tokenizers/punkt')
+    nltk.data.find('corpora/stopwords')
+    nltk.data.find('corpora/wordnet')
+    nltk.data.find('taggers/averaged_perceptron_tagger')
+    nltk.data.find('corpora/omw-1.4')
+except LookupError:
+    nltk.download('punkt_tab', quiet=True)
+    nltk.download('punkt', quiet=True)
+    nltk.download('stopwords', quiet=True)
+    nltk.download('wordnet', quiet=True)
+    nltk.download('averaged_perceptron_tagger', quiet=True)
+    nltk.download('omw-1.4', quiet=True)
 
 class ContinuousSpeechGloss:
     """
@@ -27,18 +82,15 @@ class ContinuousSpeechGloss:
     and passes results to a callback or queue.
     """
 
-    def __init__(self, model_path="vosk-model-small-en-us-0.15", callback=None):
-        # Ensure required nltk resources are available
-        import nltk
+    def __init__(self, callback=None):
+        if getattr(sys, 'frozen', False):  # if running from .exe
+            base_path = sys._MEIPASS
+        else:
+            base_path = os.path.dirname(__file__)
 
-        try:
-            nltk.data.find('tokenizers/punkt_tab')
-            nltk.data.find('tokenizers/punkt')
-            nltk.data.find('corpora/stopwords')
-        except LookupError:
-            nltk.download('punkt_tab', quiet=True)
-            nltk.download('punkt', quiet=True)
-            nltk.download('stopwords', quiet=True)
+        model_path = os.path.join(base_path, "vosk-model-small-en-us-0.15")
+
+        self.lemmatizer = WordNetLemmatizer()
 
         # Set up stop words and pronouns required for glossing
         self.stop_words = set(stopwords.words('english')) - {
@@ -89,14 +141,13 @@ class ContinuousSpeechGloss:
             "why": "WHY",
             "hello": "HI",
             "talk": "SPEAK",
-            "talking": "SPEAK",
-            "learned": "LEARN",
-            "trying": "TRY",
+            "learn": "LEARN",
+            "try": "TRY",
             "coached": "COACH",
             "habits": "HABIT",
             "millions": "MILLION",
             "skills": "SKILL",
-            "thinking": "OVERTHINKING"
+            "think": "OVERTHINKING"
         }
 
         self.model_path = model_path
@@ -106,30 +157,38 @@ class ContinuousSpeechGloss:
         self.results = queue.Queue()
 
     def convert_to_sign_gloss(self, text):
-        """Convert normal text to sign language gloss notation"""
-        words = word_tokenize(text.lower())
-        words = [w for w in words if w not in string.punctuation]
+        words = [w for w in word_tokenize(text.lower()) if w not in string.punctuation]
+        pos_tags = pos_tag(words)
+
+        def get_wordnet_pos(tag):
+            if tag.startswith('J'):
+                return wordnet.ADJ
+            elif tag.startswith('V'):
+                return wordnet.VERB
+            elif tag.startswith('N'):
+                return wordnet.NOUN
+            elif tag.startswith('R'):
+                return wordnet.ADV
+            else:
+                return wordnet.NOUN
+
+        lemmatized_words = [self.lemmatizer.lemmatize(w, get_wordnet_pos(t)) for w, t in pos_tags]
 
         gloss_sequence = []
         seen_pronouns = set()
-
-        for word in words:
-            # Only skip stop words that aren't in gloss_map
+        for word in lemmatized_words:
             if word in self.stop_words and word not in self.gloss_map:
                 continue
-
             gloss_word = self.gloss_map.get(word, word.upper()).strip()
             if not gloss_word:
                 continue
-
-            # Only include pronouns once
             if gloss_word in {"ME", "YOU", "HE", "SHE", "US", "THEY"}:
                 if gloss_word in seen_pronouns:
                     continue
                 seen_pronouns.add(gloss_word)
             gloss_sequence.append(gloss_word)
-        gloss_string = " ".join(gloss_sequence)
-        return gloss_string
+
+        return " ".join(gloss_sequence)
 
     def start(self):
         """Start continuous speech recognition in a background thread"""
@@ -255,6 +314,7 @@ class SignLanguageApp(ShowBase):
         self.speech_processor = None
 
         # Animation flags
+        self.is_animating = False
         self.signing_complete = True  # Signals whether signing is in progress
 
         # Set up the user interface
@@ -338,19 +398,36 @@ class SignLanguageApp(ShowBase):
 
     def loadModels(self):
         """Load 3D character model, arms, and attach to scene graph."""
-        # self.torso = self.loader.loadModel('character/torso.glb')
-        self.torso = self.loader.loadModel('character/body.glb')
-        self.torso.setPos(0, 0, -1.5)
-        self.torso.reparentTo(self.render)
-        self.torso.setScale(0.7)
+        try:
+            # Load torso/body
+            body_path = self.get_panda_model_path('character/body.bam')
+            print(f"Loading body from: {body_path}")
+            self.torso = self.loader.loadModel(body_path)
+            self.torso.reparentTo(self.render)
+            self.torso.setPos(0, 0, -1.5)
+            self.torso.setScale(0.7)
+            self.torso.setHpr(0, 0, 0) # Set base HPR first
 
-        # Load left and right arms as children
-        self.rarm = self.loader.loadModel('character/RArm.glb')
-        self.rarm.reparentTo(self.torso)
-        self.larm = self.loader.loadModel('character/LArm.glb')
-        self.larm.reparentTo(self.torso)
-        # Set up references to finger parts for each arm
-        self.setup_arm_details()
+            # Load right arm
+            rarm_path = self.get_panda_model_path('character/RArm.bam')
+            print(f"Loading right arm from: {rarm_path}")
+            self.rarm = self.loader.loadModel(rarm_path)
+            self.rarm.reparentTo(self.torso)
+
+            # Load left arm
+            larm_path = self.get_panda_model_path('character/LArm.bam')
+            print(f"Loading left arm from: {larm_path}")
+            self.larm = self.loader.loadModel(larm_path)
+            self.larm.reparentTo(self.torso)
+
+            self.setup_arm_details()
+            print("All models loaded successfully")
+
+        except Exception as e:
+            print(f"Error loading models: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
 
     def setup_arm_details(self):
         """
@@ -407,7 +484,7 @@ class SignLanguageApp(ShowBase):
     def setupSkybox(self):
         """Loads a skybox model if available, otherwise prints an error."""
         try:
-            skybox = self.loader.loadModel('skybox/skybox.egg')
+            skybox = self.loader.loadModel('skybox/skybox.bam')
             skybox.setScale(50)
             skybox.setBin('background', 1)
             skybox.setDepthWrite(0)
@@ -416,10 +493,38 @@ class SignLanguageApp(ShowBase):
         except Exception as e:
             print(f"Could not load skybox: {e}")
 
+    def get_resource_path(self, relative_path):
+        """Get absolute path to resource, works for dev and PyInstaller"""
+        try:
+            # PyInstaller creates a temp folder and stores path in _MEIPASS
+            base_path = sys._MEIPASS
+        except Exception:
+            # Not in a PyInstaller bundle, use the script's directory
+            base_path = os.path.abspath(os.path.dirname(__file__))
+
+        return os.path.join(base_path, relative_path)
+
+    def get_panda_model_path(self, relative_path):
+        """
+        Get Panda3D-compatible model path.
+        NOTE: This now just returns the relative path, as the
+        model-path is set correctly at startup for both dev and exe.
+        """
+        return relative_path
+
     def loadAllPoseData(self):
         """Load all sign pose definitions from local JSON file."""
-        with open("sign_poses.json", "r") as f:
-            return json.load(f)
+        pose_file = self.get_resource_path("sign_poses.json")
+
+        try:
+            with open(pose_file, "r") as f:
+                return json.load(f)
+        except FileNotFoundError:
+            print(f"Error: Could not find sign_poses.json at {pose_file}")
+            raise
+        except json.JSONDecodeError as e:
+            print(f"Error: Invalid JSON in sign_poses.json: {e}")
+            raise
 
     def loadSignPoses(self, name):
         """
@@ -431,10 +536,11 @@ class SignLanguageApp(ShowBase):
             return
         l = pose["leftHand"]
         r = pose["rightHand"]
-        self.larm.setPos(*l["pos"])
-        self.larm.setHpr(*l["hpr"])
-        self.rarm.setPos(*r["pos"])
-        self.rarm.setHpr(*r["hpr"])
+
+        self.larm.setPos(LVecBase3f(*l["pos"]))
+        self.larm.setHpr(LVecBase3f(*l["hpr"]))
+        self.rarm.setPos(LVecBase3f(*r["pos"]))
+        self.rarm.setHpr(LVecBase3f(*r["hpr"]))
 
         def applyFingerPose(finger_parts, data):
             for part, pose_data in zip(finger_parts, data):
@@ -799,4 +905,43 @@ def run_app():
 
 
 if __name__ == "__main__":
+    # --- THIS IS THE CORRECTED MAIN BLOCK ---
+
+    # 1. Setup Qt App and Loading Screen
+    app = QApplication(sys.argv)
+    loading = LoadingScreen()
+    loading.center()
+    loading.show()
+    loading.set_steps([
+        "Initializing core modules",
+        "Loading 3D engine",
+        "Loading models and animations",
+        "Setting up audio & recognition",
+        "Finalizing UI"
+    ])
+
+    # 2. Define function to run when loading finishes
+    def on_loading_finished():
+        """This function will be called by the 'finished' signal."""
+        loading.close() # Close the splash screen
+        app.quit()      # CRITICAL: Quit the Qt event loop
+
+    # 3. Connect the signal
+    loading.finished.connect(on_loading_finished)
+
+    # 4. Update progress and start the "complete" animation/timer
+    # (These just tell the UI what to display)
+    loading.update_progress("Initializing core modules", "Importing dependencies...")
+    loading.update_progress("Loading 3D engine", "Starting Panda3D...")
+    loading.update_progress("Loading models", "Body and arms loading...")
+    loading.update_progress("Setting up audio", "Vosk speech recognition engine...")
+    loading.update_progress("Finalizing UI", "Connecting event handlers...")
+    loading.complete()
+
+    # 5. Run the Qt event loop (BLOCKING)
+    # The script will pause here until app.quit() is called from our function
+    app.exec_()
+
+    # 6. --- The Qt loop is now finished ---
+    # Now that the loading screen is closed, we can safely run the main app.
     run_app()

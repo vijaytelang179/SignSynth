@@ -6,22 +6,35 @@ import threading
 import time
 
 import os, sys
+from PyQt5.QtWidgets import QApplication
+from loading_screen import LoadingScreen
+
 from panda3d.core import loadPrcFileData, Filename
 
 # Determine runtime path for onefile exe
 if getattr(sys, 'frozen', False):
+    # --- This is the FROZEN (EXE) path ---
     base_path = sys._MEIPASS
+
     # Tell Panda3D where to find display plugins
     plugins_dir = os.path.join(base_path, "plugins")
     plugins_dir = Filename.fromOsSpecific(plugins_dir).toOsSpecific()
     loadPrcFileData("", f"plugin-path {plugins_dir}")
+
+    # Add the exe's root directory to the Panda3D model search path
+    model_path = Filename.fromOsSpecific(base_path).toOsSpecific()
+    loadPrcFileData("", f"model-path {model_path}")
 
     # Force OpenGL display
     loadPrcFileData("", "load-display pandagl")
     loadPrcFileData("", "aux-display tinydisplay")
     loadPrcFileData("", "window-title SignSynth")
 else:
-    base_path = os.path.abspath(".")
+    # --- This is the DEVELOPMENT (PY) path ---
+    base_path = os.path.abspath(os.path.dirname(__file__))
+
+    model_path = Filename.fromOsSpecific(base_path).toOsSpecific()
+    loadPrcFileData("", f"model-path {model_path}")
 
 
 if getattr(sys, 'frozen', False):
@@ -47,16 +60,6 @@ from vosk import Model, KaldiRecognizer
 from nltk import pos_tag, WordNetLemmatizer
 
 import nltk
-
-print(f"Base path: {base_path}")
-
-for root, dirs, files in os.walk(base_path):
-    level = root.replace(base_path, "").count(os.sep)
-    indent = " " * 4 * level
-    print(f"{indent}{os.path.basename(root)}/")
-    subindent = " " * 4 * (level + 1)
-    for f in files:
-        print(f"{subindent}{f}")
 
 try:
     nltk.data.find('tokenizers/punkt_tab')
@@ -141,14 +144,13 @@ class ContinuousSpeechGloss:
             "why": "WHY",
             "hello": "HI",
             "talk": "SPEAK",
-            "talking": "SPEAK",
-            "learned": "LEARN",
-            "trying": "TRY",
+            "learn": "LEARN",
+            "try": "TRY",
             "coached": "COACH",
             "habits": "HABIT",
             "millions": "MILLION",
             "skills": "SKILL",
-            "thinking": "OVERTHINKING"
+            "think": "OVERTHINKING"
         }
 
         self.model_path = model_path
@@ -399,25 +401,36 @@ class SignLanguageApp(ShowBase):
 
     def loadModels(self):
         """Load 3D character model, arms, and attach to scene graph."""
-        # self.torso = self.loader.loadModel('character/torso.glb')
-        self.torso = self.loader.loadModel('character/body.glb')
-        self.torso.reparentTo(self.render)
-        self.torso.setPos(0, 0, -1.5)
-        self.torso.setScale(0.7)
-        self.torso.setHpr(0, 0, 0)
+        try:
+            # Load torso/body
+            body_path = self.get_panda_model_path('character/body.bam')
+            print(f"Loading body from: {body_path}")
+            self.torso = self.loader.loadModel(body_path)
+            self.torso.reparentTo(self.render)
+            self.torso.setPos(0, 0, -1.5)
+            self.torso.setScale(0.7)
+            self.torso.setHpr(0, 0, 0) # Set base HPR first
 
-        # Load left and right arms as children
-        self.rarm = self.loader.loadModel('character/RArm.glb')
-        self.rarm.reparentTo(self.torso)
-        self.rarm.setPos(2.2, -1.3, 1.1)
-        self.rarm.setHpr(50, 90, -90)
+            # Load right arm
+            rarm_path = self.get_panda_model_path('character/RArm.bam')
+            print(f"Loading right arm from: {rarm_path}")
+            self.rarm = self.loader.loadModel(rarm_path)
+            self.rarm.reparentTo(self.torso)
 
-        self.larm = self.loader.loadModel('character/LArm.glb')
-        self.larm.reparentTo(self.torso)
-        self.rarm.setPos(-2.2, -1.3, 1.1)
-        self.rarm.setHpr(40, 90, 0)
-        # Set up references to finger parts for each arm
-        self.setup_arm_details()
+            # Load left arm
+            larm_path = self.get_panda_model_path('character/LArm.bam')
+            print(f"Loading left arm from: {larm_path}")
+            self.larm = self.loader.loadModel(larm_path)
+            self.larm.reparentTo(self.torso)
+
+            self.setup_arm_details()
+            print("All models loaded successfully")
+
+        except Exception as e:
+            print(f"Error loading models: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
 
     def setup_arm_details(self):
         """
@@ -474,7 +487,7 @@ class SignLanguageApp(ShowBase):
     def setupSkybox(self):
         """Loads a skybox model if available, otherwise prints an error."""
         try:
-            skybox = self.loader.loadModel('skybox/skybox.egg')
+            skybox = self.loader.loadModel('skybox/skybox.bam')
             skybox.setScale(50)
             skybox.setBin('background', 1)
             skybox.setDepthWrite(0)
@@ -483,10 +496,38 @@ class SignLanguageApp(ShowBase):
         except Exception as e:
             print(f"Could not load skybox: {e}")
 
+    def get_resource_path(self, relative_path):
+        """Get absolute path to resource, works for dev and PyInstaller"""
+        try:
+            # PyInstaller creates a temp folder and stores path in _MEIPASS
+            base_path = sys._MEIPASS
+        except Exception:
+            # Not in a PyInstaller bundle, use the script's directory
+            base_path = os.path.abspath(os.path.dirname(__file__))
+
+        return os.path.join(base_path, relative_path)
+
+    def get_panda_model_path(self, relative_path):
+        """
+        Get Panda3D-compatible model path.
+        NOTE: This now just returns the relative path, as the
+        model-path is set correctly at startup for both dev and exe.
+        """
+        return relative_path
+
     def loadAllPoseData(self):
         """Load all sign pose definitions from local JSON file."""
-        with open("sign_poses.json", "r") as f:
-            return json.load(f)
+        pose_file = self.get_resource_path("sign_poses.json")
+
+        try:
+            with open(pose_file, "r") as f:
+                return json.load(f)
+        except FileNotFoundError:
+            print(f"Error: Could not find sign_poses.json at {pose_file}")
+            raise
+        except json.JSONDecodeError as e:
+            print(f"Error: Invalid JSON in sign_poses.json: {e}")
+            raise
 
     def loadSignPoses(self, name):
         """
@@ -498,10 +539,11 @@ class SignLanguageApp(ShowBase):
             return
         l = pose["leftHand"]
         r = pose["rightHand"]
-        self.larm.setPos(*l["pos"])
-        self.larm.setHpr(*l["hpr"])
-        self.rarm.setPos(*r["pos"])
-        self.rarm.setHpr(*r["hpr"])
+
+        self.larm.setPos(LVecBase3f(*l["pos"]))
+        self.larm.setHpr(LVecBase3f(*l["hpr"]))
+        self.rarm.setPos(LVecBase3f(*r["pos"]))
+        self.rarm.setHpr(LVecBase3f(*r["hpr"]))
 
         def applyFingerPose(finger_parts, data):
             for part, pose_data in zip(finger_parts, data):
