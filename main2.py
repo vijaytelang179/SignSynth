@@ -4,33 +4,30 @@ import string
 import os,sys
 import threading
 import time
-
-import os, sys
-from PyQt5.QtWidgets import QApplication
+import requests
+import webbrowser
+from PyQt5.QtWidgets import QApplication, QMessageBox
 from loading_screen import LoadingScreen
 
 from panda3d.core import loadPrcFileData, Filename
 
-# Determine runtime path for onefile exe
+APP_VERSION = "v1.0.0"
+GITHUB_REPO = "Suja2004/ASR"
+
 if getattr(sys, 'frozen', False):
-    # --- This is the FROZEN (EXE) path ---
     base_path = sys._MEIPASS
 
-    # Tell Panda3D where to find display plugins
     plugins_dir = os.path.join(base_path, "plugins")
     plugins_dir = Filename.fromOsSpecific(plugins_dir).toOsSpecific()
     loadPrcFileData("", f"plugin-path {plugins_dir}")
 
-    # Add the exe's root directory to the Panda3D model search path
     model_path = Filename.fromOsSpecific(base_path).toOsSpecific()
     loadPrcFileData("", f"model-path {model_path}")
 
-    # Force OpenGL display
     loadPrcFileData("", "load-display pandagl")
     loadPrcFileData("", "aux-display tinydisplay")
     loadPrcFileData("", "window-title SignSynth")
 else:
-    # --- This is the DEVELOPMENT (PY) path ---
     base_path = os.path.abspath(os.path.dirname(__file__))
 
     model_path = Filename.fromOsSpecific(base_path).toOsSpecific()
@@ -38,12 +35,11 @@ else:
 
 
 if getattr(sys, 'frozen', False):
-    # When running as exe
     dll_path = os.path.join(sys._MEIPASS, "vosk")
     if os.path.exists(dll_path):
         os.add_dll_directory(dll_path)
 
-from panda3d.core import LVecBase3f, DirectionalLight, AmbientLight, TextNode
+from panda3d.core import LVecBase3f, DirectionalLight, AmbientLight, TextNode, WindowProperties
 
 import pyaudio
 import win32com.client
@@ -82,16 +78,13 @@ class ContinuousSpeechGloss:
     and passes results to a callback or queue.
     """
 
-    def __init__(self, model_path="vosk-model-small-en-us-0.15", callback=None):
-        # Ensure required nltk resources are available
+    def __init__(self, callback=None):
         if getattr(sys, 'frozen', False):  # if running from .exe
             base_path = sys._MEIPASS
         else:
             base_path = os.path.dirname(__file__)
 
         model_path = os.path.join(base_path, "vosk-model-small-en-us-0.15")
-        model = Model(model_path)
-
 
         self.lemmatizer = WordNetLemmatizer()
 
@@ -277,18 +270,6 @@ class SignLanguageApp(ShowBase):
     def __init__(self):
         ShowBase.__init__(self)
 
-        # Camera and visual setup
-        self.disableMouse()
-        self.camera.setPos(0, -15, 3.25)
-        self.camera.lookAt(0, 0, 0)
-
-        # Title display
-        self.title = OnscreenText(
-            text="SignSynth",
-            style=1, fg=(1, 1, 1, 1), pos=(0, 0.9),
-            scale=0.1, mayChange=True
-        )
-
         # Load all 3D models and scene elements
         self.loadModels()
         self.setupLights()
@@ -328,6 +309,38 @@ class SignLanguageApp(ShowBase):
 
         # Prepare (but do not activate) media control functionality
         self.setup_media_control()
+
+    def open_app_window(self):
+        """
+        Manually opens the main Panda3D window and runs all
+        window-dependent setup code.
+        """
+        if self.openDefaultWindow():
+            print("Successfully opened Panda3D window.")
+
+            props = WindowProperties()
+            props.setTitle("SignSynth")
+
+            icon_path = self.get_resource_path("SignSynth.ico")
+            if os.path.exists(icon_path):
+                props.setIconFilename(icon_path)
+            else:
+                print(f"Warning: Icon file not found at {icon_path}")
+
+            self.win.requestProperties(props)
+
+            self.disableMouse()
+            self.camera.setPos(0, -15, 3.25)
+            self.camera.lookAt(0, 0, 0)
+
+            self.title = OnscreenText(
+                text="SignSynth",
+                style=1, fg=(1, 1, 1, 1), pos=(0, 0.9),
+                scale=0.1, mayChange=True
+            )
+
+        else:
+            print("Error: Failed to open Panda3D window.")
 
     def setup_ui(self):
         """
@@ -901,11 +914,111 @@ class SignLanguageApp(ShowBase):
             self.start_animation(gloss)
 
 
+def check_for_updates(loader):
+    """
+    Checks GitHub for the latest release and prompts user to update.
+    Returns True to continue loading, False to quit.
+    """
+    loader.update_progress("Checking for updates...", "")
+    try:
+        # 1. Contact GitHub API
+        api_url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+        response = requests.get(api_url, timeout=5)  # 5-second timeout
+        response.raise_for_status()  # Raise error for bad responses
+
+        latest_release = response.json()
+        latest_version = latest_release.get("tag_name")
+
+        # 2. Compare versions (simple string comparison)
+        if latest_version and latest_version.lstrip('v') > APP_VERSION.lstrip('v'):
+            print(f"Update found: {latest_version}")
+
+            # 3. Find the .exe installer URL
+            installer_url = None
+            for asset in latest_release.get("assets", []):
+                if asset.get("name", "").endswith(".exe"):
+                    installer_url = asset.get("browser_download_url")
+                    break
+
+            if not installer_url:
+                print("Update found, but no .exe installer asset.")
+                return True  # Continue without updating
+
+            # 4. Show a pop-up to the user
+            msg = QMessageBox()
+            msg.setWindowTitle("Update Available")
+            msg.setText(f"A new version ({latest_version}) is available!\n\nWould you like to download it now?")
+            msg.setIcon(QMessageBox.Information)
+            msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+            msg.setDefaultButton(QMessageBox.Yes)
+
+            choice = msg.exec_()
+
+            # 5. Handle user's choice
+            if choice == QMessageBox.Yes:
+                loader.update_progress("Opening download page...", "")
+                webbrowser.open(installer_url)  # Open download page in browser
+
+                QMessageBox.information(None, "Download Started",
+                                        "Your browser has opened to download the update.\n"
+                                        "Please run the new installer and then restart the app.\n\n"
+                                        "This application will now close.")
+                return False  # Signal to exit
+            else:
+                return True  # User clicked "No", continue with current version
+        else:
+            print("App is up-to-date.")
+            loader.update_progress("Application is up-to-date", "")
+            time.sleep(0.5)  # Give user time to read
+            return True  # App is up-to-date
+
+    except requests.exceptions.RequestException as e:
+        print(f"Could not check for updates: {e}")
+        loader.update_progress("Could not check for updates", "Continuing offline...")
+        time.sleep(1)  # Give user time to read
+        return True  # Continue (fail silently)
+
 # Main entry point, creates and runs the application
 def run_app():
-    app = SignLanguageApp()
-    app.run()
+    pass
 
 
 if __name__ == "__main__":
-    run_app()
+
+    # 1. Setup Qt App and Loading Screen
+    qt_app = QApplication(sys.argv)
+    loading = LoadingScreen(version=APP_VERSION)  # Pass in the version
+    loading.center()
+    loading.show()
+
+    should_continue = check_for_updates(loading)
+
+    if not should_continue:
+        sys.exit()
+
+    # 3. Initialize the Panda3D App
+    loadPrcFileData("", "window-type none")
+
+    # 3. Initialize the Panda3D App
+    loading.update_progress("Initializing 3D engine...", "Starting Panda3D...")
+    try:
+        # Now this call is standard, without extra args
+        panda_app = SignLanguageApp()
+    except Exception as e:
+        QMessageBox.critical(None, "Fatal Error", f"Failed to initialize Panda3D: {e}")
+        sys.exit(1)
+
+    # 4. Update status (the real work was already done in __init__)
+    loading.update_progress("Loading 3D models...", "Character, arms, and skybox")
+    loading.update_progress("Initializing audio...", "Starting Vosk speech engine")
+    loading.update_progress("Finalizing UI...", "")
+
+    # 5. Connect loading "finished" signal to quit the Qt loop
+    loading.finished.connect(qt_app.quit)
+    loading.complete()  # Start the 500ms "complete" animation
+
+    qt_app.exec_()
+
+    print("Loading complete. Starting Panda3D event loop.")
+    panda_app.open_app_window()  # Manually open the window
+    panda_app.run()

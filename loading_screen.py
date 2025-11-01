@@ -7,8 +7,9 @@ class LoadingScreen(QWidget):
 
     finished = pyqtSignal()
 
-    def __init__(self):
+    def __init__(self, version="v1.0.0"):
         super().__init__()
+        self.version_string = version
         self.init_ui()
         self.progress = 0
         self.steps = []
@@ -116,15 +117,15 @@ class LoadingScreen(QWidget):
         layout.addStretch()
 
         # Version info
-        version = QLabel("v1.0.0")
+        version = QLabel(self.version_string)
         version.setAlignment(Qt.AlignCenter)
         version.setStyleSheet("""
-            QLabel {
-                color: #606060;
-                font-size: 10px;
-                font-family: 'Segoe UI', Arial;
-            }
-        """)
+                    QLabel {
+                        color: #606060;
+                        font-size: 10px;
+                        font-family: 'Segoe UI', Arial;
+                    }
+                """)
         layout.addWidget(version)
 
         self.setLayout(layout)

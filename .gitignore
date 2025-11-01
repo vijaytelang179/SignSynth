@@ -1,6 +1,8 @@
 .venv
-build
-dist
+build/
+dist/
 main2.spec
 PycharmProjects.lnk
 Installer
+pkg.py
+__pycache__/
