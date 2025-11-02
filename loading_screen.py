@@ -1,179 +1,377 @@
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QProgressBar
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal
+import tkinter as tk
+from tkinter import ttk
+import threading
+import os
+import sys
 
 
-class LoadingScreen(QWidget):
-    """A loading screen widget that displays initialization progress."""
-
-    finished = pyqtSignal()
+class LoadingScreen:
+    """A modern loading screen widget that displays initialization progress."""
 
     def __init__(self, version="v1.0.0"):
-        super().__init__()
         self.version_string = version
-        self.init_ui()
+        self.root = tk.Tk()
+        self.finished_callback = None
         self.progress = 0
         self.steps = []
         self.current_step = 0
+        self.animation_angle = 0
+        self.is_destroyed = False
+        self.ui_lock = threading.RLock()  # <-- ADDED: The thread lock
+        self.init_ui()
+
+    def get_resource_path(self, relative_path):
+        """ Get absolute path to resource, works for dev and for PyInstaller """
+        try:
+            base_path = sys._MEIPASS
+        except Exception:
+            base_path = os.path.abspath(".")
+
+        return os.path.join(base_path, relative_path)
 
     def init_ui(self):
         """Initialize the loading screen UI."""
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
-        self.setAttribute(Qt.WA_TranslucentBackground, False)
-        self.setStyleSheet("""
-            QWidget {
-                background: qlineargradient(
-                    x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #1a1a2e, stop:1 #16213e
-                );
-            }
-        """)
+        self.root.title("SignSynth")
 
-        layout = QVBoxLayout()
-        layout.setContentsMargins(50, 50, 50, 50)
-        layout.setSpacing(20)
+        try:
+            icon_path = self.get_resource_path("SignSynth.ico")
+            if os.path.exists(icon_path):
+                self.root.iconbitmap(icon_path)
+            else:
+                print(f"Warning: Icon file not found at {icon_path}")
+        except Exception as e:
+            print(f"Warning: Could not set icon. Error: {e}")
 
-        # Title
-        title = QLabel("SignSynth")
-        title.setAlignment(Qt.AlignCenter)
-        title.setStyleSheet("""
-            QLabel {
-                color: #00d4ff;
-                font-size: 48px;
-                font-weight: bold;
-                font-family: 'Segoe UI', Arial;
-                margin-bottom: 10px;
-            }
-        """)
-        layout.addWidget(title)
+        window_width = 600
+        window_height = 450
+        self.root.geometry(f"{window_width}x{window_height}")
 
-        # Subtitle
-        subtitle = QLabel("YouTube Sign Language Integrator")
-        subtitle.setAlignment(Qt.AlignCenter)
-        subtitle.setStyleSheet("""
-            QLabel {
-                color: #a0a0a0;
-                font-size: 18px;
-                font-family: 'Segoe UI', Arial;
-                margin-bottom: 30px;
-            }
-        """)
-        layout.addWidget(subtitle)
+        self.root.resizable(False, False)
+        self.main_frame = tk.Frame(self.root, bg="#1a1a2e")
+        self.main_frame.pack(fill=tk.BOTH, expand=True)
 
-        # Progress bar
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setMinimum(0)
-        self.progress_bar.setMaximum(100)
-        self.progress_bar.setValue(0)
-        self.progress_bar.setTextVisible(True)
-        self.progress_bar.setStyleSheet("""
-            QProgressBar {
-                border: 2px solid #00d4ff;
-                border-radius: 8px;
-                background-color: #0f3460;
-                text-align: center;
-                color: white;
-                font-size: 14px;
-                font-weight: bold;
-                height: 30px;
-            }
-            QProgressBar::chunk {
-                background: qlineargradient(
-                    x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #00d4ff, stop:1 #0099cc
-                );
-                border-radius: 6px;
-            }
-        """)
-        layout.addWidget(self.progress_bar)
+        self.canvas = tk.Canvas(
+            self.main_frame,
+            bg="#1a1a2e",
+            highlightthickness=0,
+            width=window_width,
+            height=window_height
+        )
+        self.canvas.pack(fill=tk.BOTH, expand=True)
+        self._draw_gradient()
+        self.canvas.create_text(
+            300, 80,
+            text="SignSynth",
+            font=("Segoe UI", 48, "bold"),
+            fill="#00d4ff",
+            tags="title"
+        )
+        self.canvas.create_text(
+            300, 140,
+            text="YouTube Sign Language Integrator",
+            font=("Segoe UI", 16),
+            fill="#a0a0a0",
+            tags="subtitle"
+        )
+        self.circle_id = self._create_loading_circle(300, 220, 30)
+        self.progress_frame = tk.Frame(self.main_frame, bg="#0f3460", height=30)
+        self.progress_frame.place(x=100, y=280, width=400, height=30)
+        self.progress_canvas = tk.Canvas(
+            self.progress_frame,
+            bg="#0f3460",
+            highlightthickness=0,
+            height=30
+        )
+        self.progress_canvas.pack(fill=tk.BOTH, expand=True)
+        self.progress_canvas.create_rectangle(
+            0, 0, 400, 30,
+            outline="#00d4ff",
+            width=2,
+            tags="border"
+        )
+        self.progress_fill = self.progress_canvas.create_rectangle(
+            0, 0, 0, 30,
+            fill="#00d4ff",
+            outline="",
+            tags="fill"
+        )
+        self.progress_text = self.progress_canvas.create_text(
+            200, 15,
+            text="0%",
+            font=("Segoe UI", 12, "bold"),
+            fill="white",
+            tags="percent"
+        )
+        self.status_text = self.canvas.create_text(
+            300, 330,
+            text="Initializing...",
+            font=("Segoe UI", 14),
+            fill="white",
+            tags="status"
+        )
+        self.detail_text = self.canvas.create_text(
+            300, 360,
+            text="",
+            font=("Segoe UI", 11),
+            fill="#808080",
+            tags="detail"
+        )
+        self.button_frame = tk.Frame(self.main_frame, bg="#1a1a2e")
+        self.update_button = tk.Button(
+            self.button_frame,
+            text="Update and Restart",
+            font=("Segoe UI", 12, "bold"),
+            bg="#00d4ff",
+            fg="#1a1a2e",
+            activebackground="#00b8e0",
+            activeforeground="#1a1a2e",
+            relief=tk.FLAT,
+            cursor="hand2",
+            padx=20,
+            pady=10
+        )
+        self.update_button.pack(side=tk.RIGHT, padx=10)
+        self.later_button = tk.Button(
+            self.button_frame,
+            text="Later",
+            font=("Segoe UI", 12),
+            bg="#2a2a3e",
+            fg="#a0a0a0",
+            activebackground="#3a3a4e",
+            activeforeground="white",
+            relief=tk.FLAT,
+            cursor="hand2",
+            padx=20,
+            pady=10
+        )
+        self.later_button.pack(side=tk.RIGHT, padx=10)
+        self.button_frame.place_forget()
+        self.canvas.create_text(
+            300, 420,
+            text=self.version_string,
+            font=("Segoe UI", 9),
+            fill="#606060",
+            tags="version"
+        )
 
-        # Status label
-        self.status_label = QLabel("Initializing...")
-        self.status_label.setAlignment(Qt.AlignCenter)
-        self.status_label.setStyleSheet("""
-            QLabel {
-                color: #ffffff;
-                font-size: 14px;
-                font-family: 'Segoe UI', Arial;
-                margin-top: 10px;
-            }
-        """)
-        layout.addWidget(self.status_label)
+        # --- ADDED: Handlers for Escape key and window 'X' button ---
+        self.root.bind("<Escape>", self.on_escape)
+        self.root.protocol("WM_DELETE_WINDOW", self.on_escape)
+        # -----------------------------------------------------------
 
-        # Detailed status
-        self.detail_label = QLabel("")
-        self.detail_label.setAlignment(Qt.AlignCenter)
-        self.detail_label.setStyleSheet("""
-            QLabel {
-                color: #808080;
-                font-size: 12px;
-                font-family: 'Segoe UI', Arial;
-                margin-top: 5px;
-                min-height: 20px;
-            }
-        """)
-        layout.addWidget(self.detail_label)
+        self._animate_circle()
 
-        # Add stretch to center content
-        layout.addStretch()
+    # --- ADDED: Method to handle close requests ---
+    def on_escape(self, event=None):
+        """Handle Escape key press or close button click."""
+        print("Loading cancelled by user.")
+        self.close_and_finish()
 
-        # Version info
-        version = QLabel(self.version_string)
-        version.setAlignment(Qt.AlignCenter)
-        version.setStyleSheet("""
-                    QLabel {
-                        color: #606060;
-                        font-size: 10px;
-                        font-family: 'Segoe UI', Arial;
-                    }
-                """)
-        layout.addWidget(version)
+    # ----------------------------------------------
 
-        self.setLayout(layout)
+    def _draw_gradient(self):
+        """Draw a gradient-like background effect."""
+        # This method doesn't modify state, so no lock needed
+        for i in range(20):
+            y = i * 22.5
+            color_val = int(0x1a + (0x16 - 0x1a) * (i / 20))
+            color = f"#{color_val:02x}{color_val:02x}{min(0x2e + i, 0x3e):02x}"
+            self.canvas.create_rectangle(
+                0, y, 600, y + 23,
+                fill=color,
+                outline=""
+            )
 
-        # Set size
-        self.setFixedSize(600, 400)
+    def _create_loading_circle(self, x, y, radius):
+        """Create an animated loading circle."""
+        # This is only called from init_ui, so no lock needed
+        return self.canvas.create_arc(
+            x - radius, y - radius, x + radius, y + radius,
+            start=0, extent=120,
+            outline="#00d4ff",
+            width=4,
+            style=tk.ARC,
+            tags="spinner"
+        )
+
+    def _animate_circle(self):
+        """Animate the loading circle."""
+        with self.ui_lock:
+            if self.is_destroyed:
+                return
+            try:
+                self.animation_angle = (self.animation_angle + 10) % 360
+                self.canvas.itemconfig(self.circle_id, start=self.animation_angle)
+                self.root.after(50, self._animate_circle)
+            except (tk.TclError, RuntimeError):
+                # Window was destroyed after the check, just stop.
+                pass
 
     def set_steps(self, steps):
         """Set the initialization steps to display."""
+        # No lock needed as it just sets a variable
         self.steps = steps
         self.current_step = 0
 
+    def show_update_prompt(self, text, yes_callback, no_callback):
+        """Shows the update buttons and text, hides progress."""
+        with self.ui_lock:
+            if self.is_destroyed:
+                return
+            try:
+                self.canvas.itemconfig(self.status_text, text=text)
+                self.canvas.itemconfig(self.detail_text, text="")
+                self.progress_frame.place_forget()
+                self.canvas.itemconfig("spinner", state="hidden")
+                self.button_frame.place(x=150, y=280, width=300, height=60)
+                self.update_button.config(command=yes_callback)
+                self.later_button.config(command=no_callback)
+                self.root.update()
+            except (tk.TclError, RuntimeError):
+                pass  # Window destroyed
+
+    def hide_update_prompt(self):
+        """Hides the update buttons, shows progress."""
+        with self.ui_lock:
+            if self.is_destroyed:
+                return
+            try:
+                self.button_frame.place_forget()
+                self.progress_frame.place(x=100, y=280, width=400, height=30)
+                self.canvas.itemconfig("spinner", state="normal")
+                self.root.update()
+            except (tk.TclError, RuntimeError):
+                pass  # Window destroyed
+
     def update_progress(self, step_name, detail=""):
         """Update the progress bar and status."""
-        if self.steps:
-            self.current_step += 1
-            progress_value = int((self.current_step / len(self.steps)) * 100)
-            self.progress_bar.setValue(progress_value)
+        with self.ui_lock:
+            if self.is_destroyed:
+                return
+            try:
+                # RLock allows calling other locked methods
+                self.hide_update_prompt()
 
-        self.status_label.setText(step_name)
-        self.detail_label.setText(detail)
+                if self.steps:
+                    self.current_step += 1
+                    progress_value = int((self.current_step / len(self.steps)) * 100)
+                    self.set_progress(progress_value)
 
-        # Force UI update
-        QApplication.processEvents()
+                self.canvas.itemconfig(self.status_text, text=step_name)
+                self.canvas.itemconfig(self.detail_text, text=detail)
+                self.root.update()
+            except (tk.TclError, RuntimeError):
+                pass  # Window destroyed
+
+    def set_progress(self, value):
+        """Set progress bar value (0-100)."""
+        with self.ui_lock:
+            if self.is_destroyed:
+                return
+            try:
+                self.progress = max(0, min(100, value))
+                fill_width = (self.progress / 100) * 400
+                self.progress_canvas.coords(self.progress_fill, 0, 0, fill_width, 30)
+                self.progress_canvas.itemconfig(self.progress_text, text=f"{self.progress}%")
+                self.root.update()
+            except (tk.TclError, RuntimeError):
+                pass
+
+    def update_status_text(self, step_name, detail=""):
+        """
+        Updates *only* the status text and detail text labels.
+        Does NOT modify the progress bar.
+        """
+        with self.ui_lock:
+            if self.is_destroyed:
+                return
+            try:
+                self.canvas.itemconfig(self.status_text, text=step_name)
+                self.canvas.itemconfig(self.detail_text, text=detail)
+                self.root.update()
+            except (tk.TclError, RuntimeError):
+                pass  # Window destroyed
 
     def complete(self):
         """Mark loading as complete and close after a brief delay."""
-        self.progress_bar.setValue(100)
-        self.status_label.setText("Ready!")
-        self.detail_label.setText("Starting application...")
-        QApplication.processEvents()
+        with self.ui_lock:
+            if self.is_destroyed:
+                return
+            try:
+                self.hide_update_prompt()
+                self.set_progress(100)
+                self.canvas.itemconfig(self.status_text, text="Ready!")
+                self.canvas.itemconfig(self.detail_text, text="Starting application...")
+                self.root.update()
+            except (tk.TclError, RuntimeError):
+                return  # Window destroyed, don't schedule close
 
-        # Close after a short delay
-        QTimer.singleShot(500, self.close_and_finish)
+        # Schedule the close OUTSIDE the lock
+        self.root.after(500, self.close_and_finish)
 
     def close_and_finish(self):
-        """Close the loading screen and emit finished signal."""
-        self.finished.emit()
-        self.close()
+        """Close the loading screen and call finished callback."""
+        # This is the only place is_destroyed is set to True
+        with self.ui_lock:
+            if self.is_destroyed:
+                return  # Already in process of closing
+            self.is_destroyed = True
+
+        # Perform UI destruction outside the lock
+        try:
+            self.root.quit()
+            self.root.destroy()
+        except (tk.TclError, RuntimeError):
+            pass
+
+        if self.finished_callback:
+            self.finished_callback()
+
+    def finished_connect(self, callback):
+        """Connect a callback to be called when loading finishes."""
+        self.finished_callback = callback
 
     def center(self):
         """Center the window on the screen."""
-        screen = QApplication.desktop().screenGeometry()
-        size = self.geometry()
-        self.move(
-            (screen.width() - size.width()) // 2,
-            (screen.height() - size.height()) // 2
-        )
+        try:
+            self.root.update_idletasks()
+            width = self.root.winfo_width()
+            height = self.root.winfo_height()
+            x = (self.root.winfo_screenwidth() // 2) - (width // 2)
+            y = (self.root.winfo_screenheight() // 2) - (height // 2)
+            self.root.geometry(f"{width}x{height}+{x}+{y}")
+        except (tk.TclError, RuntimeError):
+            pass  # Window might be destroyed
 
+    def show(self):
+        """Show the loading screen."""
+        try:
+            self.root.deiconify()
+            self.root.update()
+        except (tk.TclError, RuntimeError):
+            pass  # Window might be destroyed
 
-from PyQt5.QtWidgets import QApplication
+    def mainloop(self):
+        """Run the tkinter event loop."""
+        try:
+            self.root.mainloop()
+        except (tk.TclError, RuntimeError):
+            pass  # Window destroyed
+
+    def update(self):
+        """Process pending events."""
+        with self.ui_lock:
+            if self.is_destroyed:
+                return
+            try:
+                self.root.update()
+            except (tk.TclError, RuntimeError):
+                pass  # Window destroyed
+
+    def quit(self):
+        """Quit the event loop."""
+        self.close_and_finish()
+
+    def close(self):
+        """Close the window."""
+        self.close_and_finish()
